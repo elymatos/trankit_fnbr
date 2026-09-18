@@ -1,0 +1,11 @@
+version: "3.3"
+services:
+    trankit:
+        build:
+            context: .
+        container_name: 'fnbr-trankit-2025'
+        restart: unless-stopped
+        ports:
+            - 8405:80
+        volumes:
+            - .:/code
