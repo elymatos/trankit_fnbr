@@ -67,6 +67,10 @@ class AnalysisPipeline:
                     "selected_lemma_id": (
                         lexical_token.selected_lemma.id if lexical_token.selected_lemma else None
                     ),
+                    "lexical_type": (
+                        lexical_token.selected_lemma.lemma_type
+                        if lexical_token.selected_lemma else None
+                    ),
                     "lemma_candidates": [lemma.id for lemma in lexical_token.lemma_candidates],
                     "lemma_type_candidates": [
                         {"type": lemma_type, "probability": probability}

@@ -3,7 +3,10 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from trankit_fnbr.converter import convert_conllu
 from trankit_fnbr.database import MariaDBLexiconRepository

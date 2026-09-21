@@ -31,7 +31,18 @@ Content-Type: application/json
 {"text": "Ele chegou em primeiro lugar.", "top_k": 3}
 ```
 
-The response includes selected lexical units, alternative lattice analyses, source spans, FNBr identifiers, top-k lemma-type probabilities, projected dependencies, and model/schema/lexicon provenance.
+The response includes selected lexical units, alternative lattice analyses, source spans, FNBr identifiers, lexical types, top-k lemma-type probabilities, projected dependencies, and model/schema/lexicon provenance.
+
+## Local sentence analysis
+
+After configuring `.env`, run one sentence without starting the API:
+
+```bash
+conda run -n trankit-fnbr python scripts/analyze.py \
+  "Ele chegou em primeiro lugar."
+```
+
+The default `--predictor lexical` mode requires the standard Portuguese Trankit model and FNBr database, but no trained FNBr checkpoint. It reports dictionary-derived lexical types and the projected dependency scaffold. To test a configured contextual checkpoint, pass `--predictor model`. Input can also be piped through standard input; use `--compact` for one-line JSON.
 
 ## Dataset conversion
 

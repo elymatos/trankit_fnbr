@@ -45,6 +45,7 @@ def test_pipeline_orchestrates_parse_lookup_selection_typing_and_projection() ->
     assert result["model_version"] == "type-fixture"
     assert result["parser_model_version"] == "parser-fixture"
     assert result["lexicon_revision"] == "r1"
+    assert result["sentences"][0]["tokens"][0]["lexical_type"] == "polarity"
     assert result["sentences"][0]["tokens"][0]["lemma_type_candidates"] == [
         {"type": "polarity", "probability": 0.8},
         {"type": "focus", "probability": 0.2},

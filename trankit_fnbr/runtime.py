@@ -7,7 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from .database import MariaDBLexiconRepository
 from .lexical import LexicalProcessor
-from .pipeline import AnalysisPipeline
+from .pipeline import AnalysisPipeline, LemmaTypePredictor, LexicalPriorPredictor
 from .trankit_adapter import TrankitUDParser
 from .type_predictor import TrankitLemmaTypePredictor
 
@@ -39,7 +39,7 @@ def create_read_only_engine(database_url: str):
     return engine
 
 
-def build_pipeline() -> AnalysisPipeline:
+def build_pipeline(predictor_mode: str = "model") -> AnalysisPipeline:
     database_url = os.environ["FNBR_DATABASE_URL"]
     revision = os.environ["FNBR_LEXICON_REVISION"]
     engine = create_read_only_engine(database_url)
@@ -54,20 +54,28 @@ def build_pipeline() -> AnalysisPipeline:
     standard = Pipeline(
         lang="portuguese", cache_dir=cache_dir, gpu=gpu, embedding=embedding
     )
-    fnbr_language = os.getenv("FNBR_TRANKIT_LANGUAGE", "customized")
-    fnbr_cache = os.getenv("FNBR_TRANKIT_CACHE_DIR", "./cache/fnbr")
-    fnbr = Pipeline(
-        lang=fnbr_language, cache_dir=fnbr_cache, gpu=gpu, embedding=embedding
-    )
+    type_predictor: LemmaTypePredictor
+    if predictor_mode == "lexical":
+        type_predictor = LexicalPriorPredictor()
+    elif predictor_mode == "model":
+        fnbr_language = os.getenv("FNBR_TRANKIT_LANGUAGE", "customized")
+        fnbr_cache = os.getenv("FNBR_TRANKIT_CACHE_DIR", "./cache/fnbr")
+        fnbr = Pipeline(
+            lang=fnbr_language, cache_dir=fnbr_cache, gpu=gpu, embedding=embedding
+        )
+        type_predictor = TrankitLemmaTypePredictor(
+            fnbr, model_version=os.getenv("FNBR_MODEL_VERSION", "unversioned")
+        )
+    else:
+        raise ValueError("predictor_mode must be 'lexical' or 'model'")
+
     return AnalysisPipeline(
         parser=TrankitUDParser(
             standard,
             model_version="trankit-1.1.2@{}".format(UPSTREAM_TRANKIT_REVISION[:12]),
         ),
         lexical_processor=LexicalProcessor(repository),
-        type_predictor=TrankitLemmaTypePredictor(
-            fnbr, model_version=os.getenv("FNBR_MODEL_VERSION", "unversioned")
-        ),
+        type_predictor=type_predictor,
         database_schema_version=repository.schema_version,
     )
 
