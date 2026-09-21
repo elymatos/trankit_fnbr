@@ -123,8 +123,8 @@
   <section id="summary">
     <h2>1. Executive summary</h2>
     <div class="note success">
-      <strong>The default local command performs one Trankit parse, not two.</strong>
-      It then uses direct FNBr database lookup, Python lexical processing, and deterministic dependency projection. No WebTool process or HTTP service is called.
+      <strong>The number of Trankit executions depends on the selected mode.</strong>
+      The local command defaults to <code>--predictor lexical</code>, which executes Trankit only once on the raw sentence. It then performs direct FNBr database lookup, Python lexical processing, and deterministic dependency projection—without a second Trankit call. If the command is run with <code>--predictor model</code>, it executes Trankit a second time on the selected, pre-tokenized lexical units. No WebTool process or HTTP service is called in either mode.
     </div>
     <p>The implementation has two type-prediction modes:</p>
     <ul>
