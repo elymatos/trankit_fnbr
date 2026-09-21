@@ -16,7 +16,7 @@ def fixture_engine():
             idNamespace INTEGER, idUDPOS INTEGER, pattern TEXT, compiledPattern TEXT
         )""")
         connection.exec_driver_sql("INSERT INTO language VALUES (1, 'pt')")
-        connection.exec_driver_sql("INSERT INTO namespace VALUES (10, 'connection', 'lemma')")
+        connection.exec_driver_sql("INSERT INTO namespace VALUES (10, 'nsp_lemma_connection', 'lemma')")
         connection.exec_driver_sql("INSERT INTO udpos VALUES (20, 'ADV')")
         connection.exec_driver_sql("INSERT INTO lexicon VALUES (30, 'portanto')")
         connection.exec_driver_sql("INSERT INTO lemma VALUES (40, 'portanto', 1, 30, 10, 20, NULL, NULL)")

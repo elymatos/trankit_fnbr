@@ -1,4 +1,4 @@
-from typing import Dict, Sequence, Tuple
+from typing import Dict, Optional, Sequence, Tuple
 
 from sqlalchemy import Engine, bindparam, inspect, text
 
@@ -7,6 +7,13 @@ from .domain import Lemma, Pattern
 
 class UnsupportedSchemaError(RuntimeError):
     pass
+
+
+def _canonical_lemma_type(value: Optional[str]) -> Optional[str]:
+    prefix = "nsp_lemma_"
+    if value and value.startswith(prefix):
+        return value[len(prefix):]
+    return value
 
 
 _REQUIRED_COLUMNS = {
@@ -77,7 +84,8 @@ class MariaDBLexiconRepository:
                 statement, {"form": form, "language": language, "upos": upos}
             ).mappings().all()
         candidates = tuple(Lemma(
-            int(row["idLemma"]), row["name"], row["lemma_type"], row["upos"]
+            int(row["idLemma"]), row["name"],
+            _canonical_lemma_type(row["lemma_type"]), row["upos"]
         ) for row in rows)
         matching = tuple(lemma for lemma in candidates if lemma.upos in (None, upos))
         return matching or candidates
@@ -98,7 +106,8 @@ class MariaDBLexiconRepository:
         with self.engine.connect() as connection:
             rows = connection.execute(statement, {"language": language}).mappings().all()
         patterns = tuple(Pattern(
-            int(row["idLemma"]), row["name"], row["pattern"], row["lemma_type"], reviewed=True
+            int(row["idLemma"]), row["name"], row["pattern"],
+            _canonical_lemma_type(row["lemma_type"]), reviewed=True
         ) for row in rows)
         self._patterns[language] = patterns
         return patterns

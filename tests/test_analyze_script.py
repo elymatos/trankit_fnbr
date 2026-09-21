@@ -7,6 +7,7 @@ from scripts import analyze
 
 class FakePipeline:
     def analyze(self, sentence, top_k):
+        print("analyzer diagnostic")
         return {"sentence": sentence, "top_k": top_k}
 
 
@@ -17,6 +18,7 @@ def test_analyze_script_prints_pipeline_result(monkeypatch, capsys) -> None:
 
     def build(predictor_mode):
         modes.append(predictor_mode)
+        print("loader diagnostic")
         return FakePipeline()
 
     monkeypatch.setattr(analyze, "build_pipeline", build)
@@ -24,10 +26,13 @@ def test_analyze_script_prints_pipeline_result(monkeypatch, capsys) -> None:
     analyze.main(["Ele chegou.", "--top-k", "2"])
 
     assert modes == ["lexical"]
-    assert json.loads(capsys.readouterr().out) == {
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == {
         "sentence": "Ele chegou.",
         "top_k": 2,
     }
+    assert "loader diagnostic" in captured.err
+    assert "analyzer diagnostic" in captured.err
 
 
 def test_analyze_script_explains_missing_database_configuration(

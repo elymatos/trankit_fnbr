@@ -2,6 +2,7 @@
 """Run the FNBr pipeline for one raw sentence and print its JSON result."""
 
 import argparse
+from contextlib import redirect_stdout
 import json
 import os
 import sys
@@ -55,7 +56,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     if not sentence:
         parser.error("a non-empty sentence is required")
 
-    result = build_pipeline(predictor_mode=args.predictor).analyze(sentence, args.top_k)
+    # Trankit reports model-loading progress on stdout. Keep stdout reserved
+    # for the machine-readable result and route those diagnostics to stderr.
+    with redirect_stdout(sys.stderr):
+        pipeline = build_pipeline(predictor_mode=args.predictor)
+        result = pipeline.analyze(sentence, args.top_k)
     json.dump(
         result,
         sys.stdout,
