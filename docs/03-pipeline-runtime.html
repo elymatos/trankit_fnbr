@@ -208,15 +208,15 @@
 
     <h3>5.1 Local FNBr pipeline — recommended for inspection</h3>
     <pre><code>conda run -n trankit-fnbr python scripts/analyze.py \
-  "Ele chegou em primeiro lugar."</code></pre>
+  "ele tomou o café da manhã logo cedo"</code></pre>
     <p>This defaults to lexical mode. Standard output is JSON; model-loading diagnostics go to standard error. For compact JSON or piped input:</p>
-    <pre><code>echo "Ele chegou." | conda run -n trankit-fnbr \
+    <pre><code>echo "ele tomou o café da manhã logo cedo" | conda run -n trankit-fnbr \
   python scripts/analyze.py --compact</code></pre>
 
     <h3>5.2 Local contextual-model mode</h3>
     <pre><code>conda run -n trankit-fnbr python scripts/analyze.py \
   --predictor model --top-k 3 \
-  "Ele chegou em primeiro lugar."</code></pre>
+  "ele tomou o café da manhã logo cedo"</code></pre>
     <p>This requires the customized checkpoint configured by <code>FNBR_TRANKIT_LANGUAGE</code>, <code>FNBR_TRANKIT_CACHE_DIR</code>, and <code>FNBR_MODEL_VERSION</code>.</p>
 
     <h3>5.3 HTTP API</h3>
@@ -224,19 +224,33 @@
 
 curl -s http://localhost:8000/fnbr/ \
   -H 'Content-Type: application/json' \
-  -d '{"text":"Ele chegou em primeiro lugar.","top_k":3}'</code></pre>
+  -d '{"text":"ele tomou o café da manhã logo cedo","top_k":3}'</code></pre>
     <div class="note warning">
-      The current API constructs <code>LazyConfiguredPipeline</code>, whose default is <strong>model mode</strong>. It therefore expects a trained customized checkpoint. The API does not currently expose a request parameter for switching to lexical mode.
+      The API mode is selected at process startup through <code>FNBR_PREDICTOR_MODE</code>. Use <code>lexical</code> for the database-derived baseline or <code>model</code> for a trained customized checkpoint. It cannot be switched per request.
     </div>
 
-    <h3>5.4 Python API — complete pipeline</h3>
+    <h3>5.4 Docker container</h3>
+    <p>Create the deployment configuration first. Set a real read-only database URL and identifiable lexicon revision. Keep <code>FNBR_PREDICTOR_MODE=lexical</code> unless a trained FNBr checkpoint is present under the mounted cache.</p>
+    <pre><code>cp .env.example .env
+# Edit .env before continuing.
+
+docker compose up --build -d
+docker compose logs -f trankit-fnbr</code></pre>
+    <p>The Compose service publishes container port 80 as <code>localhost:8405</code> and mounts <code>./cache</code> at <code>/code/cache</code>, so downloaded models survive container replacement. In another terminal:</p>
+    <pre><code>curl -s http://localhost:8405/fnbr/ \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"ele tomou o café da manhã logo cedo","top_k":3}'</code></pre>
+    <p>Stop and remove the service without deleting the model cache:</p>
+    <pre><code>docker compose down</code></pre>
+
+    <h3>5.5 Python API — complete pipeline</h3>
     <pre><code>from trankit_fnbr.runtime import build_pipeline
 
 pipeline = build_pipeline(predictor_mode="lexical")
-result = pipeline.analyze("Ele chegou em primeiro lugar.", top_k=3)</code></pre>
+result = pipeline.analyze("ele tomou o café da manhã logo cedo", top_k=3)</code></pre>
     <p>Use <code>predictor_mode="model"</code> only when the customized FNBr checkpoint is configured.</p>
 
-    <h3>5.5 Standard Trankit only — raw text</h3>
+    <h3>5.6 Standard Trankit only — raw text</h3>
     <pre><code>from trankit import Pipeline
 
 parser = Pipeline(
@@ -245,10 +259,10 @@ parser = Pipeline(
     gpu=False,
     embedding="xlm-roberta-large",
 )
-standard_ud = parser("Ele chegou em primeiro lugar.")</code></pre>
+standard_ud = parser("ele tomou o café da manhã logo cedo")</code></pre>
     <p>This bypasses FNBr lookup, MWE lattice construction, lexical types, provenance, and dependency projection.</p>
 
-    <h3>5.6 Customized Trankit only — pre-tokenized input</h3>
+    <h3>5.7 Customized Trankit only — pre-tokenized input</h3>
     <pre><code>from trankit import Pipeline
 
 fnbr_parser = Pipeline(
@@ -258,7 +272,7 @@ fnbr_parser = Pipeline(
     embedding="xlm-roberta-large",
 )
 result = fnbr_parser.posdep(
-    ["Ele", "chegou", "em primeiro lugar", "."],
+    ["ele", "tomou", "o", "café da manhã", "logo", "cedo"],
     is_sent=True,
 )</code></pre>
     <div class="note danger">
@@ -283,19 +297,19 @@ result = fnbr_parser.posdep(
     </table>
 
     <h3>Observed baseline example</h3>
-    <p>For <code>Ele chegou em primeiro lugar.</code>, the current database-backed baseline selects:</p>
+    <p>For <code>ele tomou o café da manhã logo cedo</code>, the current database-backed baseline selects:</p>
     <table>
       <thead><tr><th>Unit</th><th>Lexical type</th><th>Status</th></tr></thead>
       <tbody>
-        <tr><td>Ele</td><td><code>reference</code></td><td>resolved</td></tr>
-        <tr><td>chegou</td><td><code>event</code></td><td>resolved</td></tr>
-        <tr><td>em</td><td>—</td><td>multiple lemma candidates</td></tr>
-        <tr><td>primeiro</td><td><code>value</code></td><td>resolved</td></tr>
-        <tr><td>lugar</td><td><code>object</code></td><td>resolved</td></tr>
-        <tr><td>.</td><td>—</td><td>unresolved punctuation</td></tr>
+        <tr><td>ele</td><td><code>reference</code></td><td>resolved</td></tr>
+        <tr><td>tomou</td><td><code>event</code></td><td>resolved</td></tr>
+        <tr><td>o</td><td>—</td><td>multiple lemma candidates</td></tr>
+        <tr><td>café da manhã</td><td><code>object</code></td><td>resolved MWE</td></tr>
+        <tr><td>logo</td><td><code>connection</code></td><td>resolved</td></tr>
+        <tr><td>cedo</td><td><code>value</code></td><td>resolved</td></tr>
       </tbody>
     </table>
-    <p><code>em primeiro lugar</code> is not selected as an MWE in this snapshot because no matching lexical MWE was found. A matching <code>$pp</code> construction may remain in the lattice, but a structural construction is not itself substituted into the lexical projection.</p>
+    <p>The three first-pass tokens <code>café</code>, <code>da</code>, and <code>manhã</code> are replaced by the selected lexical unit <code>café da manhã</code>. Its external <code>obj</code> attachment to <code>tomou</code> is retained in the projected dependency scaffold.</p>
   </section>
 
   <section id="limitations">

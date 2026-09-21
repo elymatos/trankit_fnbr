@@ -92,7 +92,9 @@ class LazyConfiguredPipeline:
             with self._lock:
                 if self._pipeline is None:
                     try:
-                        self._pipeline = build_pipeline()
+                        self._pipeline = build_pipeline(
+                            predictor_mode=os.getenv("FNBR_PREDICTOR_MODE", "model")
+                        )
                     except SQLAlchemyError as error:
                         raise ConnectionError("FNBr database is unavailable") from error
 
