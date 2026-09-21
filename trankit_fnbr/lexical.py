@@ -7,7 +7,7 @@ from .repository import LexiconRepository
 
 
 _ELEMENT_RE = re.compile(r"\{[^}]+\}[+*]?|\[[^]]+\]|<[^>]+>|\([^()]+\)[+*]?|[^\s]+")
-_SOURCE_PRIORITY = {"construction": 3, "fixed": 2, "variable": 1, "ordinary": 0}
+_SOURCE_PRIORITY = {"fixed": 2, "variable": 1, "ordinary": 0}
 
 
 class LexicalProcessor:
@@ -152,7 +152,10 @@ class LexicalProcessor:
     def _select(
         self, lattice: Sequence[LexicalToken], tokens: Sequence[ParsedToken]
     ) -> List[LexicalToken]:
-        lexical_candidates = [candidate for candidate in lattice if candidate.source != "ordinary"]
+        lexical_candidates = [
+            candidate for candidate in lattice
+            if candidate.source not in {"ordinary", "construction"}
+        ]
         lexical_candidates.sort(key=lambda candidate: (
             -int(candidate.reviewed),
             -_SOURCE_PRIORITY.get(candidate.source, 0),

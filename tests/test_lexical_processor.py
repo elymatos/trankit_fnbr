@@ -40,7 +40,7 @@ def test_processor_matches_variable_pos_pattern() -> None:
     repo = InMemoryLexiconRepository(
         revision="fixture-2",
         forms={"mil": [Lemma(2, "mil", "quantification", "NUM")]},
-        patterns=[Pattern(20, "$number_mil", "{NUM} mil", "quantification")],
+        patterns=[Pattern(20, "number_mil", "{NUM} mil", "quantification")],
     )
     tokens = [token(1, "dois", "NUM", 0, 4), token(2, "mil", "NUM", 5, 8)]
 
@@ -49,7 +49,7 @@ def test_processor_matches_variable_pos_pattern() -> None:
     assert [(item.text, item.selected_lemma.id) for item in result.selected] == [("dois mil", 20)]
 
 
-def test_selection_uses_confirmed_source_precedence_for_overlaps() -> None:
+def test_constructions_remain_lattice_evidence_without_replacing_lexical_units() -> None:
     repo = InMemoryLexiconRepository(
         revision="fixture-3",
         forms={},
@@ -65,7 +65,8 @@ def test_selection_uses_confirmed_source_precedence_for_overlaps() -> None:
     assert [
         (item.start_token, item.end_token, item.selected_lemma.id if item.selected_lemma else None)
         for item in result.selected
-    ] == [(1, 2, 31), (3, 3, None)]
+    ] == [(1, 3, 30)]
+    assert any(item.source == "construction" for item in result.lattice)
 
 
 def test_processor_matches_optional_groups_and_pos_alternatives() -> None:
@@ -98,7 +99,7 @@ def test_processor_resolves_variable_references_and_repetition() -> None:
 
     result = LexicalProcessor(repo).process(tokens, language="pt")
 
-    assert any(
-        item.text == "dois três mil" and item.selected_lemma.id == 51
-        for item in result.lattice
-    )
+    assert [(item.text, item.selected_lemma.id) for item in result.selected] == [
+        ("dois três mil", 51)
+    ]
+    assert any(item.source == "construction" for item in result.lattice)

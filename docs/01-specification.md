@@ -215,7 +215,7 @@ A model without this provenance is not reproducible because a changed MWE invent
 
 The selected sequence is a linear projection of the token lattice built by the in-repository lexical processor. It may replace several component words with one MWE token. The lattice and rejected alternatives are retained in metadata but cannot be fed directly to Trankit.
 
-Selection must be deterministic for the first experiment. The policy must be stated in the converter and tested. It should at minimum define precedence between reviewed MWEs, fixed MWEs, variable patterns, constructions, overlapping spans, and unresolved candidates.
+Selection must be deterministic for the first experiment. The policy must be stated in the converter and tested. It should at minimum define precedence between reviewed MWEs, fixed MWEs, variable patterns, overlapping spans, and unresolved candidates. Matches of `$...` construction abstractions remain lattice evidence; because they are named structural abstractions rather than lexical units, they do not replace words or MWEs in the selected lexical projection.
 
 ### 7.4 Dependency projection
 
