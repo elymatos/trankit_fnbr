@@ -2,7 +2,7 @@
 
 A self-contained FNBr lexical-analysis service. It performs Portuguese UD parsing, reads FNBr lexical data directly from MariaDB, recognizes words and MWEs, selects a deterministic non-overlapping lexical sequence, projects the UD tree onto that sequence, and predicts contextual FNBr lemma types.
 
-See [`docs/01-specification.md`](docs/01-specification.md) for the complete contract and [`docs/02-upstream-trankit.md`](docs/02-upstream-trankit.md) for the pinned Trankit baseline.
+See [`docs/01-specification.md`](docs/01-specification.md) for the complete contract, [`docs/02-upstream-trankit.md`](docs/02-upstream-trankit.md) for the pinned Trankit baseline, and [`docs/03-pipeline-runtime.html`](docs/03-pipeline-runtime.html) for the implemented execution flow and parser-access options.
 
 ## Environment
 

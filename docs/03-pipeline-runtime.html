@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trankit FNBr — Runtime Pipeline and Parser Access</title>
+  <style>
+    :root {
+      --ink: #17202a;
+      --muted: #5d6d7e;
+      --paper: #fbfcfc;
+      --panel: #ffffff;
+      --line: #d5d8dc;
+      --blue: #1f618d;
+      --blue-soft: #eaf2f8;
+      --green: #1e8449;
+      --green-soft: #e9f7ef;
+      --amber: #9a6700;
+      --amber-soft: #fef9e7;
+      --red: #a93226;
+      --red-soft: #fdedec;
+      --code: #17202a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 16px/1.58 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { max-width: 1120px; margin: 0 auto; padding: 48px 28px 80px; }
+    h1, h2, h3 { line-height: 1.2; color: #12344d; }
+    h1 { margin: 0 0 8px; font-size: clamp(2rem, 5vw, 3.2rem); }
+    h2 { margin-top: 52px; padding-bottom: 8px; border-bottom: 2px solid var(--blue-soft); }
+    h3 { margin-top: 30px; }
+    p, li { max-width: 88ch; }
+    a { color: var(--blue); }
+    code { font: .92em ui-monospace, SFMono-Regular, Consolas, monospace; }
+    pre {
+      overflow-x: auto;
+      padding: 18px;
+      color: #f8f9f9;
+      background: var(--code);
+      border-radius: 8px;
+      line-height: 1.45;
+    }
+    pre code { font-size: .88rem; }
+    table { width: 100%; border-collapse: collapse; margin: 18px 0; background: var(--panel); }
+    th, td { padding: 11px 13px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--blue-soft); color: #154360; }
+    .meta { color: var(--muted); margin-top: 0; }
+    .lead { font-size: 1.13rem; max-width: 78ch; }
+    .card, .note {
+      margin: 18px 0;
+      padding: 18px 20px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    .note { border-left: 5px solid var(--blue); }
+    .note.warning { background: var(--amber-soft); border-left-color: var(--amber); }
+    .note.danger { background: var(--red-soft); border-left-color: var(--red); }
+    .note.success { background: var(--green-soft); border-left-color: var(--green); }
+    .flow { display: grid; gap: 10px; margin: 24px 0; }
+    .step {
+      display: grid;
+      grid-template-columns: 54px 1fr;
+      gap: 15px;
+      align-items: start;
+      padding: 15px 18px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    .step .number {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      color: white;
+      background: var(--blue);
+      font-weight: 700;
+    }
+    .step h3 { margin: 1px 0 4px; font-size: 1.05rem; }
+    .step p { margin: 0; color: var(--muted); }
+    .arrow { text-align: center; color: var(--blue); font-size: 1.35rem; line-height: 1; }
+    .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .78rem; font-weight: 700; }
+    .badge.now { color: #145a32; background: var(--green-soft); }
+    .badge.optional { color: #7d6608; background: var(--amber-soft); }
+    .compare td:first-child { width: 24%; font-weight: 650; }
+    .toc { columns: 2; padding-left: 1.2rem; }
+    .small { color: var(--muted); font-size: .9rem; }
+    @media (max-width: 680px) {
+      main { padding: 28px 16px 56px; }
+      .toc { columns: 1; }
+      .step { grid-template-columns: 42px 1fr; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Runtime Pipeline and Parser Access</h1>
+    <p class="meta">Trankit FNBr · current behavior at commit <code>0e9a17b</code> · 2026-09-21</p>
+    <p class="lead">This document records what the implementation actually executes, how that differs from the original two-parser plan, and the supported ways to invoke either the complete FNBr pipeline or Trankit directly.</p>
+  </header>
+
+  <nav class="card" aria-label="Contents">
+    <strong>Contents</strong>
+    <ol class="toc">
+      <li><a href="#summary">Executive summary</a></li>
+      <li><a href="#current">Current runtime flow</a></li>
+      <li><a href="#modes">Execution modes</a></li>
+      <li><a href="#comparison">Original plan versus implementation</a></li>
+      <li><a href="#access">Ways to access the parser</a></li>
+      <li><a href="#response">Response interpretation</a></li>
+      <li><a href="#limitations">Current boundaries</a></li>
+    </ol>
+  </nav>
+
+  <section id="summary">
+    <h2>1. Executive summary</h2>
+    <div class="note success">
+      <strong>The default local command performs one Trankit parse, not two.</strong>
+      It then uses direct FNBr database lookup, Python lexical processing, and deterministic dependency projection. No WebTool process or HTTP service is called.
+    </div>
+    <p>The implementation has two type-prediction modes:</p>
+    <ul>
+      <li><strong>Lexical mode:</strong> one standard Trankit pass; types come from selected FNBr lemmas; dependencies are projected from the first UD tree.</li>
+      <li><strong>Model mode:</strong> the same first pass and lexical processing, followed by a second pre-tokenized Trankit FNBr call for contextual type probabilities.</li>
+    </ul>
+    <div class="note warning">
+      <strong>Important:</strong> even in model mode, the current final <code>head</code> and <code>deprel</code> values come from deterministic projection of the first parse. The second Trankit call's dependency predictions are not copied into the response.
+    </div>
+  </section>
+
+  <section id="current">
+    <h2>2. Current runtime flow</h2>
+    <div class="flow">
+      <div class="step"><div class="number">1</div><div><h3>Raw-text Trankit pass</h3><p><code>TrankitUDParser.parse(text)</code> invokes the Portuguese Trankit pipeline on raw text. It obtains sentence boundaries, forms, lemmas, UPOS/XPOS, features, UD heads, dependency relations, and character spans. UD contraction expansions are collapsed back to surface contractions for FNBr matching.</p></div></div>
+      <div class="arrow">↓</div>
+      <div class="step"><div class="number">2</div><div><h3>Direct FNBr lexical lookup</h3><p><code>MariaDBLexiconRepository</code> reads forms, lemmas, POS, types, and patterns from the FNBr database using read-only SQLAlchemy access. Database namespace identifiers such as <code>nsp_lemma_event</code> are normalized to the canonical fifteen labels.</p></div></div>
+      <div class="arrow">↓</div>
+      <div class="step"><div class="number">3</div><div><h3>Python lexical processing</h3><p><code>LexicalProcessor</code> builds a lattice containing ordinary lexical candidates, MWE/pattern candidates, and construction matches. It deterministically selects a non-overlapping sequence of lexical units. <code>$...</code> construction abstractions remain evidence in the lattice and do not replace lexical units.</p></div></div>
+      <div class="arrow">↓</div>
+      <div class="step"><div class="number">4</div><div><h3>Dependency projection</h3><p><code>project_dependencies()</code> collapses each selected MWE span into one lexical token, keeps the span's external syntactic attachment, redirects external dependents, renumbers the tree, and validates root, connectivity, and acyclicity.</p></div></div>
+      <div class="arrow">↓</div>
+      <div class="step"><div class="number">5</div><div><h3>Type evidence</h3><p>Lexical mode derives candidates from FNBr lemma types. Model mode additionally calls the customized Trankit pipeline with the selected token strings and reads its ranked <code>lemma_type_candidates</code>.</p></div></div>
+      <div class="arrow">↓</div>
+      <div class="step"><div class="number">6</div><div><h3>FNBr-aware response</h3><p>The response contains the selected sequence, lexical type, ranked type candidates, projected dependency scaffold, source token/character spans, complete candidate lattice, and model/schema/lexicon provenance.</p></div></div>
+    </div>
+    <p class="small">Primary implementation: <code>trankit_fnbr/pipeline.py</code>. Runtime assembly: <code>trankit_fnbr/runtime.py</code>.</p>
+  </section>
+
+  <section id="modes">
+    <h2>3. Execution modes</h2>
+    <div class="modes">
+      <article class="card">
+        <span class="badge now">Baseline</span>
+        <h3>Lexical mode</h3>
+        <p><strong>Trankit calls:</strong> one raw-text call.</p>
+        <p><strong>Type source:</strong> FNBr database lemma types. If several candidate lemmas have different types, candidates are returned with a uniform prior; ambiguity is not resolved contextually.</p>
+        <p><strong>Dependencies:</strong> projected from the first UD parse.</p>
+        <p><strong>Needs:</strong> Portuguese Trankit model, database URL, and lexicon revision. It does not require a trained FNBr checkpoint.</p>
+      </article>
+      <article class="card">
+        <span class="badge optional">Optional experiment</span>
+        <h3>Model mode</h3>
+        <p><strong>Trankit calls:</strong> one raw-text Portuguese call plus one pre-tokenized customized call.</p>
+        <p><strong>Type source:</strong> contextual probabilities from the dedicated fifteen-label head.</p>
+        <p><strong>Dependencies:</strong> still projected from the first UD parse in the current orchestrator.</p>
+        <p><strong>Needs:</strong> everything required by lexical mode plus a compatible trained FNBr checkpoint.</p>
+      </article>
+    </div>
+    <table>
+      <thead><tr><th>Goal</th><th>Recommended mode</th></tr></thead>
+      <tbody>
+        <tr><td>Inspect MWE recognition and lexical types</td><td><strong>Lexical</strong></td></tr>
+        <tr><td>Produce the deterministic FNBr lexical projection</td><td><strong>Lexical</strong></td></tr>
+        <tr><td>Evaluate contextual type probabilities</td><td><strong>Model</strong></td></tr>
+        <tr><td>Evaluate a learned second dependency tree</td><td>Not exposed by the current orchestration; requires a deliberate pipeline change</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="comparison">
+    <h2>4. Original plan versus current implementation</h2>
+    <table class="compare">
+      <thead><tr><th>Stage</th><th>Original plan</th><th>Current implementation</th></tr></thead>
+      <tbody>
+        <tr><td>First parser</td><td>Parse raw text to obtain forms, POS, and dependencies.</td><td>Implemented by the standard Portuguese Trankit pass.</td></tr>
+        <tr><td>Lexical/MWE service</td><td>Send first-pass output to WebTool for lemma and MWE identification.</td><td>WebTool is not called. Python code reads the FNBr database directly and owns lexical processing.</td></tr>
+        <tr><td>Selected units</td><td>Build a token sequence in which recognized MWEs can be single units.</td><td>Implemented as a deterministic projection selected from a retained lexical lattice.</td></tr>
+        <tr><td>Second parser</td><td>Pass selected units as tokens and use its complete parse as the final result.</td><td>Absent in lexical mode. In model mode, pre-tokenized selected units are sent to customized Trankit, but only type probabilities are consumed.</td></tr>
+        <tr><td>Final dependencies</td><td>Learned by the second parser.</td><td>Projected from the first UD tree.</td></tr>
+        <tr><td>Final type</td><td>Expected from the FNBr-aware second parser.</td><td>Database lexical type in baseline mode; contextual ranked prediction in model mode.</td></tr>
+      </tbody>
+    </table>
+    <div class="note">
+      The current design deliberately separates a <strong>lexical type</strong> stored in FNBr from a <strong>contextual type prediction</strong>. A model prediction is evidence and does not overwrite the authoritative lemma record.
+    </div>
+  </section>
+
+  <section id="access">
+    <h2>5. Ways to access the parser</h2>
+
+    <h3>5.1 Local FNBr pipeline — recommended for inspection</h3>
+    <pre><code>conda run -n trankit-fnbr python scripts/analyze.py \
+  "Ele chegou em primeiro lugar."</code></pre>
+    <p>This defaults to lexical mode. Standard output is JSON; model-loading diagnostics go to standard error. For compact JSON or piped input:</p>
+    <pre><code>echo "Ele chegou." | conda run -n trankit-fnbr \
+  python scripts/analyze.py --compact</code></pre>
+
+    <h3>5.2 Local contextual-model mode</h3>
+    <pre><code>conda run -n trankit-fnbr python scripts/analyze.py \
+  --predictor model --top-k 3 \
+  "Ele chegou em primeiro lugar."</code></pre>
+    <p>This requires the customized checkpoint configured by <code>FNBR_TRANKIT_LANGUAGE</code>, <code>FNBR_TRANKIT_CACHE_DIR</code>, and <code>FNBR_MODEL_VERSION</code>.</p>
+
+    <h3>5.3 HTTP API</h3>
+    <pre><code>conda run -n trankit-fnbr fastapi run main.py --port 8000
+
+curl -s http://localhost:8000/fnbr/ \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Ele chegou em primeiro lugar.","top_k":3}'</code></pre>
+    <div class="note warning">
+      The current API constructs <code>LazyConfiguredPipeline</code>, whose default is <strong>model mode</strong>. It therefore expects a trained customized checkpoint. The API does not currently expose a request parameter for switching to lexical mode.
+    </div>
+
+    <h3>5.4 Python API — complete pipeline</h3>
+    <pre><code>from trankit_fnbr.runtime import build_pipeline
+
+pipeline = build_pipeline(predictor_mode="lexical")
+result = pipeline.analyze("Ele chegou em primeiro lugar.", top_k=3)</code></pre>
+    <p>Use <code>predictor_mode="model"</code> only when the customized FNBr checkpoint is configured.</p>
+
+    <h3>5.5 Standard Trankit only — raw text</h3>
+    <pre><code>from trankit import Pipeline
+
+parser = Pipeline(
+    lang="portuguese",
+    cache_dir="./cache/trankit",
+    gpu=False,
+    embedding="xlm-roberta-large",
+)
+standard_ud = parser("Ele chegou em primeiro lugar.")</code></pre>
+    <p>This bypasses FNBr lookup, MWE lattice construction, lexical types, provenance, and dependency projection.</p>
+
+    <h3>5.6 Customized Trankit only — pre-tokenized input</h3>
+    <pre><code>from trankit import Pipeline
+
+fnbr_parser = Pipeline(
+    lang="customized",
+    cache_dir="./cache/fnbr",
+    gpu=False,
+    embedding="xlm-roberta-large",
+)
+result = fnbr_parser.posdep(
+    ["Ele", "chegou", "em primeiro lugar", "."],
+    is_sent=True,
+)</code></pre>
+    <div class="note danger">
+      This is a low-level diagnostic interface. It bypasses database revision checks, candidate provenance, lattice selection, source spans, and projection validation. Callers must not treat it as equivalent to <code>AnalysisPipeline.analyze()</code>.
+    </div>
+  </section>
+
+  <section id="response">
+    <h2>6. Response interpretation</h2>
+    <table>
+      <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>selected_lemma_id</code></td><td>The chosen FNBr lemma, or <code>null</code> when unresolved or ambiguous.</td></tr>
+        <tr><td><code>lexical_type</code></td><td>The authoritative type stored on the selected FNBr lemma. It is not a contextual model prediction.</td></tr>
+        <tr><td><code>lemma_candidates</code></td><td>All retained FNBr lemma identifiers for the selected span.</td></tr>
+        <tr><td><code>lemma_type_candidates</code></td><td>Ranked type evidence. In lexical mode this is a dictionary-derived prior; in model mode it comes from the customized head.</td></tr>
+        <tr><td><code>head</code>, <code>deprel</code></td><td>The dependency scaffold projected from the first UD parse.</td></tr>
+        <tr><td><code>source_token_ids</code></td><td>The first-pass word tokens represented by this lexical unit.</td></tr>
+        <tr><td><code>start_char</code>, <code>end_char</code></td><td>Offsets into the original text.</td></tr>
+        <tr><td><code>lattice</code></td><td>Selected and rejected lexical/pattern/construction evidence retained for diagnostics.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Observed baseline example</h3>
+    <p>For <code>Ele chegou em primeiro lugar.</code>, the current database-backed baseline selects:</p>
+    <table>
+      <thead><tr><th>Unit</th><th>Lexical type</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>Ele</td><td><code>reference</code></td><td>resolved</td></tr>
+        <tr><td>chegou</td><td><code>event</code></td><td>resolved</td></tr>
+        <tr><td>em</td><td>—</td><td>multiple lemma candidates</td></tr>
+        <tr><td>primeiro</td><td><code>value</code></td><td>resolved</td></tr>
+        <tr><td>lugar</td><td><code>object</code></td><td>resolved</td></tr>
+        <tr><td>.</td><td>—</td><td>unresolved punctuation</td></tr>
+      </tbody>
+    </table>
+    <p><code>em primeiro lugar</code> is not selected as an MWE in this snapshot because no matching lexical MWE was found. A matching <code>$pp</code> construction may remain in the lattice, but a structural construction is not itself substituted into the lexical projection.</p>
+  </section>
+
+  <section id="limitations">
+    <h2>7. Current boundaries and pending choices</h2>
+    <ul>
+      <li>The contextual predictor runs after lexical sequence selection and does not currently feed its probabilities back into lemma or MWE selection.</li>
+      <li>The second Trankit pass's dependency predictions are not used by <code>AnalysisPipeline</code>.</li>
+      <li>The HTTP endpoint currently selects model mode at startup; lexical/model mode is selectable only through the local or Python interfaces.</li>
+      <li>The Python pattern matcher covers the implemented pattern subset. Construction matches are diagnostic lattice evidence rather than selected lexical units.</li>
+      <li>A genuine lexicon revision must replace the example <code>webtool45-YYYYMMDD</code> value before output is considered reproducible.</li>
+    </ul>
+    <div class="note">
+      <strong>Decision point:</strong> the deterministic lexical projection is sufficient for the baseline goal of returning FNBr lexical units, lexical types, and a dependency scaffold. Dataset conversion and a second trained pass become necessary only if contextual disambiguation or learned lexical-unit dependencies are required and shown to improve this baseline.
+    </div>
+  </section>
+
+  <footer>
+    <h2>Related documents</h2>
+    <ul>
+      <li><a href="01-specification.md"><code>docs/01-specification.md</code></a> — normative project specification</li>
+      <li><a href="02-upstream-trankit.md"><code>docs/02-upstream-trankit.md</code></a> — upstream revision and fork changes</li>
+      <li><a href="../CONTEXT.md"><code>CONTEXT.md</code></a> — domain terminology</li>
+    </ul>
+  </footer>
+</main>
+</body>
+</html>
