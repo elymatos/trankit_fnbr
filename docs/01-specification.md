@@ -4,19 +4,19 @@
 
 Draft for the first FNBr-specific Trankit extension.
 
-This specification consolidates the prior Trankit analysis notes from WebTool and supersedes their implementation choices where they conflict with the decisions below.
+This specification supersedes prior implementation assumptions that made WebTool part of the runtime pipeline. WebTool remains a reference for existing FNBr lexical-processing behavior, but `trankit_fnbr` implements and owns that behavior in Python.
 
 ## 1. Purpose
 
 FrameNet Brasil needs a representation of text meaning before a lexical frame has been selected. The first computational step toward that representation is a contextual analysis over **FNBr lexical units**, including fixed and variable MWEs, rather than only over UD word tokens.
 
-`trankit_fnbr` provides that step. It predicts a contextual FNBr lemma type and a dependency scaffold over the lexical-unit sequence supplied by WebTool.
+`trankit_fnbr` provides that step as a self-contained pipeline. Starting from raw text, it performs standard Portuguese analysis, reads lexical data directly from the FNBr database, recognizes lexical candidates and MWEs, selects a non-overlapping lexical-unit sequence, and predicts a contextual FNBr lemma type and dependency scaffold over that sequence.
 
 The core principle is:
 
 > Text meaning should be representable before the system knows which lexical frame it instantiates.
 
-This is not a proposal to replace UD, FrameNet, the WebTool lexer, or the Frame Meaning Representation. It adds an occurrence-level bridge between them.
+This is not a proposal to replace UD or FrameNet. It adds an occurrence-level bridge between them without requiring another application to preprocess runtime input.
 
 ## 2. Scope
 
@@ -25,7 +25,9 @@ This is not a proposal to replace UD, FrameNet, the WebTool lexer, or the Frame 
 - a maintained fork of Trankit;
 - a new contextual `lemma_type` classifier over 15 FNBr types;
 - training-data conversion from Portparser CoNLL-U files;
-- WebTool-compatible MWE-aware lexical segmentation;
+- a Python implementation of FNBr lexical lookup, candidate recognition, and MWE-aware segmentation;
+- direct, read-only access to a versioned FNBr database schema;
+- token-lattice construction and deterministic selection of a non-overlapping lexical sequence;
 - projection of a UD dependency tree onto the selected lexical units;
 - top-k type probabilities and type-aware API output;
 - evaluation of type prediction, MWE-aware parsing, and lexical disambiguation benefit.
@@ -33,48 +35,56 @@ This is not a proposal to replace UD, FrameNet, the WebTool lexer, or the Frame 
 ### Out of scope for the first version
 
 - replacing the first UD parsing pass;
-- replacing WebTool MWE or construction recognition;
+- integration with or runtime dependence on WebTool;
+- editing or administering FNBr lexical data;
 - a complete semantic dependency grammar;
 - direct prediction of frames, FEs, schemas, or microframes;
 - coreference, implicit participants, document-level temporal structure, or unrestricted scope;
 - automatic creation of frames or microframes.
 
-## 3. Existing systems and responsibilities
+## 3. Components and responsibilities
+
+All runtime components below belong to this repository and are exposed as one pipeline.
 
 | Component | Responsibility |
 |---|---|
-| First Trankit pass in WebTool | Standard Portuguese tokenization, UPOS, morphology, and UD parsing over syntactic words. |
-| WebTool lexical graph | Form/lemma recognition, fixed MWEs, variable patterns, constructions, candidate lemmas, and token-span provenance. |
-| WebTool selected sequence | A non-overlapping linear projection containing ordinary lexical tokens and selected MWE tokens. |
-| `trankit_fnbr` | Contextual lemma-type probabilities and a lexical-unit dependency scaffold over that selected sequence. |
-| Pre-Frame Semantic Graph | Interprets the scaffold into conceptual nodes, procedural operators, unresolved relations, and later schema/frame hypotheses. |
+| Standard Trankit pass | Portuguese tokenization, UPOS, morphology, and UD parsing over syntactic words. |
+| FNBr database adapter | Read forms, lemmas, lemma types, fixed and variable MWE definitions, constructions, and stable identifiers from the FNBr database. |
+| Python lexical processor | Perform form/lemma lookup, recognize fixed MWEs, variable patterns, and constructions, and build candidate analyses with token-span provenance. |
+| Sequence selector | Deterministically choose a non-overlapping linear projection containing ordinary lexical tokens and selected MWE tokens. |
+| Trankit FNBr pass | Produce contextual lemma-type probabilities and a lexical-unit dependency scaffold over the selected sequence. |
+| API layer | Accept raw text and return the selected sequence, lattice provenance, model predictions, and dependency scaffold. |
 
-The WebTool tokenizer persists a token lattice, not merely a linear sequence. For example, it can retain both `em`, `primeiro`, `lugar` and a selected span `em primeiro lugar`. The full lattice remains evidence. `trankit_fnbr` consumes only the selected, non-overlapping projection.
+The lexical processor persists a token lattice, not merely a linear sequence. For example, it can retain both `em`, `primeiro`, `lugar` and a candidate span `em primeiro lugar`. The full lattice remains evidence, while the FNBr model consumes only the selected, non-overlapping projection.
 
-Every MWE is a lemma. The WebTool export must therefore attach its selected lemma to its MWE token through the same conceptual mechanism used for a single-word token.
+Every MWE is a lemma. The selected MWE token must therefore carry its selected lemma through the same domain representation used for a single-word token.
 
-## 4. Two-pass pipeline
+WebTool is neither called nor imported at runtime. Its current behavior and documentation may be used to derive compatibility tests while the required algorithms are ported to Python. Once specified here, this repository's tests and versioned lexical-processing rules define pipeline behavior.
+
+## 4. Self-contained two-pass pipeline
 
 ```text
 Raw sentence
   ↓
 Trankit 1: standard UD parsing over syntactic words
   ↓
-WebTool lexical graph: lemma candidates, MWE/pattern recognition, token lattice
+Python FNBr lexical processor + direct database lookup
   ↓
-WebTool selected lexical sequence: non-overlapping words and MWEs
+Token lattice + deterministic non-overlapping lexical sequence
   ↓
 Trankit FNBr: lemma-type distribution + lexical dependency scaffold
   ↓
-Pre-Frame Semantic Graph
+Pipeline response
 ```
 
-The two models have distinct jobs:
+The two model passes have distinct jobs:
 
 | Pass | Input units | Output purpose |
 |---|---|---|
-| Trankit 1 | syntactic words | conventional UD evidence for WebTool lexical recognition and later interpretation |
+| Trankit 1 | syntactic words | conventional UD evidence used by lexical recognition and dependency projection |
 | Trankit FNBr | selected FNBr lexical units, including MWEs | contextual typing and lexical-unit attachment scaffold |
+
+The database lookup and lexical-processing stages between the two passes are first-class parts of `trankit_fnbr`, not external preprocessing.
 
 ## 5. FNBr lemma types
 
@@ -82,7 +92,7 @@ The label inventory is defined by the FNBr lemma-typing specification. A lemma h
 
 ### 5.1 Conceptual types
 
-| Type | Expected graph contribution |
+| Type | Expected interpretive contribution |
 |---|---|
 | `event` | candidate event occurrence |
 | `object` | candidate discourse entity |
@@ -93,7 +103,7 @@ The label inventory is defined by the FNBr lemma-typing specification. A lemma h
 
 ### 5.2 Procedural types
 
-| Type | Expected graph-building contribution |
+| Type | Expected operational contribution |
 |---|---|
 | `reference` | introduce or resolve a referent |
 | `quantification` | quantify a node or situation |
@@ -139,15 +149,15 @@ For every selected lexical token, return at least:
 }
 ```
 
-The API must preserve enough identifiers to reconnect the output to WebTool's selected token, lemma, original spans, and source components. The exact response schema is an implementation detail, but this information is mandatory.
+The API must preserve enough identifiers to reconnect each output item to the pipeline's selected token, FNBr database lemma, original character and token spans, and source components. The exact response schema is an implementation detail, but this information is mandatory.
 
 ### 6.3 Dependency scaffold
 
 For the first model, HEAD and DEPREL are a projected UD tree over lexical units. They are not yet a semantic dependency grammar.
 
-A later semantic layer may deterministically interpret combinations such as:
+A downstream consumer may interpret combinations such as:
 
-| Dependent type | Head type | Projected UD relation | Initial graph operation |
+| Dependent type | Head type | Projected UD relation | Candidate interpretation |
 |---|---|---|---|
 | `polarity` | `event` | `advmod` | polarity scope candidate |
 | `degree` | `value` | `advmod` | degree/value attachment |
@@ -185,17 +195,17 @@ Do not combine variants `0`–`9`: they are alternative random versions of the s
 For every Portparser sentence:
 
 1. read the `# text` comment and original CoNLL-U tree;
-2. call the same WebTool tokenizer/lexical graph export used at runtime;
+2. run the same in-repository Python lexical processor and database adapter used at runtime;
 3. select one non-overlapping lexical sequence;
-4. preserve the source sentence ID, source CoNLL-U token IDs, WebTool token IDs, MWE component spans, selected lemma IDs, and tokenizer/lexicon versions;
+4. preserve the source sentence ID, source CoNLL-U token IDs, internal lexical-token IDs, MWE component spans, selected database lemma IDs, and tokenizer, lexical-rule, schema, and lexicon versions;
 5. emit the converted training instance.
 
 A conversion run must record:
 
 - Portparser source files and checksums;
-- WebTool commit;
-- FNBr database/lexicon snapshot identifier;
-- lexical segmentation policy version;
+- `trankit_fnbr` commit;
+- FNBr database schema version and lexicon snapshot identifier;
+- lexical-processing and segmentation-policy versions;
 - converter version;
 - generated dataset checksums.
 
@@ -203,7 +213,7 @@ A model without this provenance is not reproducible because a changed MWE invent
 
 ### 7.3 Selected segmentation
 
-The selected sequence is a linear projection of WebTool's token lattice. It may replace several component words with one MWE token. The lattice and rejected alternatives are retained in metadata but cannot be fed directly to Trankit.
+The selected sequence is a linear projection of the token lattice built by the in-repository lexical processor. It may replace several component words with one MWE token. The lattice and rejected alternatives are retained in metadata but cannot be fed directly to Trankit.
 
 Selection must be deterministic for the first experiment. The policy must be stated in the converter and tested. It should at minimum define precedence between reviewed MWEs, fixed MWEs, variable patterns, constructions, overlapping spans, and unresolved candidates.
 
@@ -253,47 +263,64 @@ Example:
 
 The Trankit FNBr reader must explicitly load `FNBRType` from MISC. CoNLL-U tools that do not know the extension can still read the projected tree.
 
-## 8. Runtime integration
+## 8. Runtime API
 
-WebTool will send a selected pre-tokenized sequence to a dedicated FNBr endpoint. It must not send overlapping raw `token` rows.
-
-```text
-WebTool selected tokens + selected lemma IDs + span provenance
-  → trankit_fnbr endpoint
-  → contextual type probabilities + scaffold dependencies
-  → WebTool Pre-Frame Semantic Graph builder
-```
-
-The service must accept pre-tokenized lexical units that may contain spaces. Before implementation, test how Trankit's XLM-R tokenization treats an input item such as `em primeiro lugar`. Preserve the human-readable form and component offsets regardless of the internal wordpiece representation.
-
-## 9. From scaffold to Pre-Frame Semantic Graph
-
-The Trankit FNBr output is not the final meaning representation.
-
-Conceptual types normally create candidate graph nodes. Procedural types create graph-building operations. Projected dependencies identify local attachment candidates. Later stages may add schema bindings, microframe hypotheses, frame hypotheses, null-instantiated roles, coreference, and non-local scope.
+The primary endpoint accepts raw text. A caller does not need to know the FNBr database schema, identify lexical candidates, resolve overlapping MWEs, or construct a pre-tokenized lexical sequence.
 
 ```text
-Typed lexical dependency scaffold
-  ↓
-conceptual nodes + procedural operators + unresolved participant links
-  ↓
-schema and microframe hypotheses
-  ↓
-frame matching
+Raw text
+  → standard Trankit pass
+  → FNBr database lookup and Python lexical processing
+  → deterministic lexical-sequence selection
+  → Trankit FNBr pass
+  → selected tokens + lattice provenance + type probabilities + scaffold dependencies
 ```
 
-The graph may have reentrancy and multiple edges, while Trankit's output must remain a dependency tree. The tree is evidence and a useful backbone, not a restriction on the graph's final form.
+A lower-level pre-tokenized interface may exist for training, tests, and diagnostics, but it is not the primary integration contract and must not bypass provenance validation silently.
+
+Selected lexical units may contain spaces. Before implementation, test how Trankit's XLM-R tokenization treats an item such as `em primeiro lugar`. Preserve its human-readable form, component token IDs, and character offsets regardless of the internal wordpiece representation.
+
+The response must identify the model version, lexical-processing policy version, database schema version, and lexicon snapshot or revision used. It must include unresolved and ambiguous lexical analyses rather than silently discarding them.
+
+## 9. Direct FNBr database access
+
+### 9.1 Data ownership and access mode
+
+The FNBr database is the authoritative source for lexical records. `trankit_fnbr` accesses it through a repository-owned Python data-access layer. All SQL and schema-specific mapping must remain behind that layer so model and pipeline code use stable domain objects rather than database rows.
+
+Runtime access is read-only. This project must not create, update, or delete FNBr records. Credentials are supplied through deployment configuration, never committed to the repository or included in API output and dataset provenance.
+
+### 9.2 Required lexical data
+
+The adapter must expose, with stable FNBr identifiers where available:
+
+- forms and normalized forms;
+- lemmas and their fifteen-way types;
+- form-to-lemma analyses;
+- fixed MWE definitions and components;
+- variable MWE or pattern definitions required by recognition;
+- constructions and constraints required by sequence selection;
+- the database schema version and a lexicon snapshot or revision identifier.
+
+The exact tables and joins are adapter implementation details. Before coding the adapter, map the deployed FNBr schema and add fixture-backed contract tests for each required query.
+
+### 9.3 Reproducibility and failure behavior
+
+Training conversion must use an immutable database snapshot or exported lexical snapshot. Runtime may use a live read replica, but every result must report the identifiable lexicon revision used. Caches must be invalidated or namespaced by that revision.
+
+The service must fail clearly when the database is unavailable, the schema version is unsupported, or the lexical revision cannot be identified. It must not continue with an unreported stale or partial lexicon. Connection pooling, query timeouts, and bounded caches are required deployment concerns; their concrete values remain configurable.
 
 ## 10. Training and evaluation
 
 ### 10.1 Training stages
 
-1. Verify conversion and projected-tree validity without modifying Trankit.
-2. Add and test `lemma_type` training and inference.
-3. Train type prediction over the converted `h8418_0` split.
-4. Train jointly with projected dependency prediction only after the type-only baseline is measured.
-5. Integrate top-k predictions into WebTool lemma-candidate ranking.
-6. Build a small reviewed Pre-Frame Semantic Graph pilot.
+1. Implement and validate the read-only FNBr database adapter against a pinned schema and lexical snapshot.
+2. Port lexical lookup, MWE and construction recognition, lattice construction, and deterministic selection to Python, with compatibility fixtures derived from reviewed examples.
+3. Verify conversion and projected-tree validity without modifying Trankit.
+4. Add and test `lemma_type` training and inference.
+5. Train type prediction over the converted `h8418_0` split.
+6. Train jointly with projected dependency prediction only after the type-only baseline is measured.
+7. Evaluate whether top-k predictions improve contextual lemma-candidate ranking inside the self-contained pipeline.
 
 ### 10.2 Required metrics
 
@@ -305,9 +332,10 @@ Report:
 - confusion matrix;
 - top-2 and top-3 type recall;
 - results for tokens with multiple candidate lemmas of different types;
-- MWE segmentation and selected-lemma coverage;
+- MWE recognition, segmentation, and selected-lemma coverage;
 - projected-tree UAS/LAS;
-- conversion failures, unresolved labels, and excluded instances.
+- database lookup, conversion, unresolved-label, and excluded-instance counts;
+- lexical-processor compatibility results for reviewed reference fixtures.
 
 Do not report only aggregate accuracy: frequent categories can conceal failure on `role`, `connection`, `modality`, `interaction`, and other semantically decisive types.
 
@@ -315,10 +343,12 @@ Do not report only aggregate accuracy: frequent categories can conceal failure o
 
 Proceed to semantic dependency labels or frame matching only when:
 
-- the converter is deterministic and validates all projected trees;
+- direct database lookup is covered by schema contract tests;
+- lexical processing and sequence selection are deterministic for a fixed input and lexicon revision;
+- the converter validates all projected trees;
 - type metrics are reported by category, not merely globally;
-- uncertainty is returned to WebTool;
-- type prediction demonstrably improves contextual lemma disambiguation or provides useful graph-building evidence.
+- uncertainty is exposed in the pipeline response;
+- type prediction demonstrably improves contextual lemma disambiguation or otherwise supplies useful downstream evidence.
 
 ## 11. Implementation work packages
 
@@ -327,42 +357,56 @@ Proceed to semantic dependency labels or frame matching only when:
 - Record upstream Trankit revision and local modifications.
 - Establish tests that confirm original Portuguese parsing behavior remains available.
 
-### WP2 — Data converter
+### WP2 — FNBr database adapter
+
+- Document the supported database engine and schema version.
+- Configure read-only, pooled access without storing credentials in source control.
+- Map database records to typed Python representations for forms, lemmas, types, MWEs, patterns, and constructions.
+- Add fixture-backed query contract tests and explicit schema-compatibility checks.
+- Expose a lexicon revision suitable for provenance and cache namespacing.
+
+### WP3 — Python lexical processor
+
+- Implement normalization and form/lemma lookup.
+- Implement fixed MWE, variable-pattern, and construction recognition required by the pipeline.
+- Build the complete token lattice with source spans and candidate provenance.
+- Implement and version deterministic overlap resolution and sequence selection.
+- Add reviewed compatibility fixtures for ordinary words, contractions, fixed and variable MWEs, constructions, overlaps, ambiguity, and unresolved input.
+
+### WP4 — Data converter
 
 - Read Portparser CoNLL-U.
-- Obtain WebTool selected lexical segmentation and lemma data.
+- Run the same database adapter, lexical processor, and selector used at runtime.
 - Project the tree and write extended CoNLL-U plus provenance metadata.
 - Add unit tests for ordinary tokens, MWE collapse, external dependents, roots, contractions, and overlapping candidates.
 
-### WP3 — Lemma-type model
+### WP5 — Lemma-type model
 
 - Add vocabulary, dataset reader, batch fields, classifier head, loss, prediction probabilities, serialization, and evaluation.
-- Add regression tests for dataset loading and API output.
+- Add regression tests for dataset loading and pipeline output.
 
-### WP4 — API
+### WP6 — Self-contained API
 
-- Add a dedicated pre-tokenized FNBr endpoint rather than changing the established UD endpoint silently.
-- Return identifiers and top-k type candidates required by WebTool.
-
-### WP5 — WebTool adapter
-
-- Export selected sequence and provenance.
-- Consume type probabilities.
-- Build the initial typed lexical dependency scaffold.
+- Add a raw-text FNBr endpoint that orchestrates both Trankit passes, direct lexical lookup, lexical processing, sequence selection, and dependency projection.
+- Return selected and alternative analyses, stable FNBr identifiers, spans, provenance versions, top-k type candidates, and scaffold dependencies.
+- Keep any pre-tokenized endpoint explicitly lower-level and suitable for tests or controlled internal use.
 
 ## 12. Open questions
 
-1. What deterministic policy selects among overlapping MWEs and constructions?
-2. How should Trankit's wordpiece tokenizer receive multiword lexical units: original spaces, an escaped form, or an adapter-level representation?
-3. Which labels may be generated automatically from the migrated lemma inventory, and which require human review?
-4. Should the first model train all dependency tasks jointly or initially train the new head against frozen/projected syntactic evidence?
-5. How should constructional coercion be represented in training data without making a defeasible lexical type appear incorrect?
-6. Which procedural attachments can safely be converted into graph operations deterministically?
-7. How much does contextual type prediction improve same-form/same-POS lemma disambiguation over lexical lookup alone?
+1. Which deployed FNBr database engine, schema version, and tables are authoritative for this project?
+2. What mechanism identifies an immutable lexicon snapshot for training and a revision for live runtime queries?
+3. What deterministic policy selects among reviewed MWEs, fixed MWEs, variable patterns, constructions, overlapping spans, and unresolved candidates?
+4. Which existing lexical-processing behaviors must be reproduced exactly, and which may be redesigned in the Python implementation?
+5. How should Trankit's wordpiece tokenizer receive multiword lexical units: original spaces, an escaped form, or an adapter-level representation?
+6. Which labels may be generated automatically from the migrated lemma inventory, and which require human review?
+7. Should the first model train all dependency tasks jointly or initially train the new head against frozen/projected syntactic evidence?
+8. How should constructional coercion be represented in training data without making a defeasible lexical type appear incorrect?
+9. How much does contextual type prediction improve same-form/same-POS lemma disambiguation over lexical lookup alone?
+10. Should runtime use a live read replica, a synchronized local lexical snapshot, or support both modes?
 
 ## 13. Sources
 
-- FNBr/WebTool lemma typing design: `app/UI/views/Documentation/ontological_dimension/lemmas.md` in the WebTool repository.
-- WebTool lexical graph and tokenizer architecture: `docs/lexicon/lexicon-architecture.html` in the WebTool repository.
+- FNBr lemma typing design: `app/UI/views/Documentation/ontological_dimension/lemmas.md` in the WebTool repository.
+- Existing lexical-processing behavior used as a porting reference: `docs/lexicon/lexicon-architecture.html` in the WebTool repository.
 - Portparser dataset and provenance: `/home/ematos/devel/python/Portparser/README.md`.
 - Trankit source, customized training, and POS/dependency architecture: upstream Trankit repository and the forked `trankit/` directory.

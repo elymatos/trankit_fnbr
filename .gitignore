@@ -1,3 +1,20 @@
+# Models and generated data
+/cache/
+/outputs/
+*.manifest.json
 
-/cache
-/trankit
+# Credentials
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+
+# Editors
+.idea/
+.vscode/
