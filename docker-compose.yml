@@ -4,9 +4,12 @@ services:
       context: .
     container_name: fnbr-trankit
     restart: unless-stopped
+    init: true
     env_file:
       - .env
+    environment:
+      TRANKIT_GPU: "false"
     ports:
-      - "8405:80"
+      - "${FNBR_HTTP_BIND:-127.0.0.1}:${FNBR_HTTP_PORT:-8405}:80"
     volumes:
       - ./cache:/code/cache

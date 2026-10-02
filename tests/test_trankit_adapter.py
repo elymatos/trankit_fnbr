@@ -20,6 +20,24 @@ def test_adapter_maps_trankit_output_to_source_tokens() -> None:
     ]
 
 
+def test_adapter_chooses_contraction_anchor_without_creating_cycle() -> None:
+    class CyclicContraction:
+        def __call__(self, text):
+            return {"sentences": [{"tokens": [
+                {"id": 1, "text": "mais", "head": 3, "deprel": "advmod"},
+                {"id": [2, 3], "text": "dum", "expanded": [
+                    {"id": 2, "text": "de", "head": 1, "deprel": "fixed"},
+                    {"id": 3, "text": "um", "head": 4, "deprel": "nummod"},
+                ]},
+                {"id": 4, "text": "ano", "head": 0, "deprel": "root"},
+            ]}]}
+
+    sentence = TrankitUDParser(CyclicContraction()).parse("mais dum ano")[0]
+    assert [(word.text, word.head) for word in sentence] == [
+        ("mais", 2), ("dum", 4), ("ano", 0)
+    ]
+
+
 def test_adapter_preserves_contractions_and_collapses_expanded_dependencies() -> None:
     class ContractionTrankit:
         def __call__(self, text):

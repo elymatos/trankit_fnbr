@@ -31,7 +31,21 @@ Content-Type: application/json
 {"text": "Ele chegou em primeiro lugar.", "top_k": 3}
 ```
 
-The response includes selected lexical units, alternative lattice analyses, source spans, FNBr identifiers, lexical types, top-k lemma-type probabilities, projected dependencies, and model/schema/lexicon provenance.
+The response includes selected lexical units, alternative lattice analyses, source spans, FNBr identifiers, lexical types, top-k lemma-type probabilities, lexical-unit dependencies, and model/schema/lexicon provenance. With a joint checkpoint, `projected_head`/`projected_deprel` retain the original UD projection alongside model predictions.
+
+## Docker HTTP service
+
+The image uses the `trankit-fnbr` Conda environment. It does **not** contain credentials or model weights: Compose reads `.env` and mounts `./cache` at `/code/cache`. Ensure `cache/trankit/xlm-roberta-large/portuguese/` and `cache/fnbr-joint/xlm-roberta-large/customized/` contain the standard Portuguese model and trained joint checkpoint (including `fnbr.training.json`). Set `.env` to `FNBR_PREDICTOR_MODE=model`, `FNBR_SCAFFOLD_SOURCE=model`, `FNBR_TRANKIT_CACHE_DIR=./cache/fnbr-joint`, and the corresponding `FNBR_MODEL_VERSION` and `FNBR_LEXICON_REVISION`. The configured database must be reachable **from inside the container** with read-only credentials.
+
+```bash
+docker compose up --build -d
+conda run -n trankit-fnbr python scripts/smoke_http.py
+curl -sS http://127.0.0.1:8405/health/ready
+curl -sS http://127.0.0.1:8405/fnbr/ -H 'Content-Type: application/json' \
+  -d '{"text":"Ele tomou o café da manhã logo cedo.","top_k":3}'
+```
+
+`GET /health/live` checks only the HTTP process. `GET /health/ready` checks the loaded model and database connectivity, returning a generic 503 on failure. Compose publishes `127.0.0.1:8405` by default; set `FNBR_HTTP_BIND=0.0.0.0` in `.env` only behind a trusted reverse proxy with TLS and authentication. Set `FNBR_HTTP_PORT` to change the host port. The container runs one CPU worker to avoid duplicating two large XLM-R models. Do not expose this unauthenticated service directly to the Internet.
 
 ## Local sentence analysis
 
@@ -75,7 +89,33 @@ trainer = TPipeline({
 trainer.train()
 ```
 
-After measuring the baseline, remove `lemma_type_only` (or set it to `False`) to train jointly with projected POS/dependency objectives.
+Or use the validated train/dev entry point (the test split is never used to select a checkpoint):
+
+```bash
+conda run -n trankit-fnbr python scripts/train_fnbr.py --epochs 5 --batch-size 4
+conda run -n trankit-fnbr python scripts/evaluate_fnbr.py
+```
+
+The run uses provisional WebTool labels only for uniquely selected typed lemmas. Ambiguous and unresolved tokens remain in the projected tree but are masked from type loss and evaluation. The checkpoint is selected by development-set FNBr macro-F1; its UPOS/UAS/LAS scores are **not** meaningful in type-only mode. Test results are written to `outputs/h8418_0_test.metrics.json`. For runtime model mode, set `FNBR_TRANKIT_CACHE_DIR=./cache/fnbr`, `FNBR_PREDICTOR_MODE=model`, and an identifiable `FNBR_MODEL_VERSION` in the environment. The live-database timestamp revision identifies the conversion run but does not establish an immutable snapshot or independently reviewed occurrence labels.
+
+For a separate jointly trained type/POS/dependency checkpoint, run:
+
+```bash
+conda run -n trankit-fnbr python scripts/train_fnbr.py --joint --epochs 5 --batch-size 4
+conda run -n trankit-fnbr python scripts/evaluate_fnbr.py \
+  --cache-dir ./cache/fnbr-joint --output outputs/h8418_0_test.joint.metrics.json
+```
+
+To test the joint checkpoint locally on raw text:
+
+```bash
+conda run -n trankit-fnbr python scripts/analyze.py --predictor model \
+  --fnbr-cache-dir ./cache/fnbr-joint --scaffold-source model \
+  --model-version h8418_0-joint-epoch3@202610021100 \
+  "Ele tomou o café da manhã logo cedo."
+```
+
+To serve it, set `FNBR_TRANKIT_CACHE_DIR=./cache/fnbr-joint`, `FNBR_PREDICTOR_MODE=model`, `FNBR_SCAFFOLD_SOURCE=model`, and the corresponding `FNBR_MODEL_VERSION`. The response uses **learned lexical-unit dependencies** in `head`/`deprel`, retains `projected_head`/`projected_deprel` as the first-pass syntactic baseline, and identifies `scaffold_source`. Runtime verifies the joint-training metadata and checkpoint checksum. Leave `FNBR_SCAFFOLD_SOURCE=projected` for type-only checkpoints; their dependency weights are untrained. Test UAS/LAS in the evaluation JSON include punctuation and are measured against the automatically projected tree, **not** a semantic dependency grammar.
 
 ## Verification
 

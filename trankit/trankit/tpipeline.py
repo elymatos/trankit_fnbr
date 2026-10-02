@@ -10,6 +10,7 @@ from .utils.tokenizer_utils import *
 from .utils.scorers.ner_scorer import score_by_entity
 from collections import defaultdict
 from .utils.conll import *
+from .utils.posdep_utils import _fnbr_type_from_misc
 from .utils.tbinfo import tbname2training_id, lang2treebank
 from .utils.chuliu_edmonds import *
 from tqdm import tqdm
@@ -469,7 +470,7 @@ class TPipeline:
 
     def _train_posdep(self):
         ensure_dir(os.path.join(self._config._save_dir, 'preds'))
-        best_dev = {'average': 0}
+        best_dev = {'average': 0, 'fnbr_macro_f1': -1}
         best_epoch = 0
         for epoch in range(self._config.max_epoch):
             self._printlog('*' * 30)
@@ -500,7 +501,8 @@ class TPipeline:
             dev_score, pred_conllu_fpath = self._eval_posdep(data_set=self.dev_set, batch_num=self.dev_batch_num,
                                                              name='dev', epoch=epoch)
 
-            if epoch <= 30 or dev_score['average'] > best_dev['average']:
+            metric = 'fnbr_macro_f1' if self._config.lemma_type_only else 'average'
+            if dev_score[metric] > best_dev[metric]:
                 self._save_model(ckpt_fpath=os.path.join(self._config._save_dir,
                                                          '{}.tagger.mdl'.format(self._lang)),
                                  epoch=epoch)
@@ -513,6 +515,8 @@ class TPipeline:
             remove_with_path(pred_conllu_fpath)
             self._printlog('-' * 30 + ' Best dev CoNLLu score: epoch {}'.format(best_epoch) + '-' * 30)
             self._printlog(get_ud_performance_table(dev_score))
+            if self._config.lemma_type_only:
+                self._printlog('FNBr dev macro-F1: {:.4f}'.format(dev_score['fnbr_macro_f1']))
 
     def _eval_posdep(self, data_set, batch_num, name, epoch):
         self._embedding_layers.eval()
@@ -521,6 +525,13 @@ class TPipeline:
         progress = tqdm(total=batch_num, ncols=75,
                         desc='{} {}'.format(name, epoch))
 
+        gold_types, predicted_types = [], []
+        gold_sentences = CoNLL.conll2dict(input_file=data_set.gold_conllu)
+        gold_by_position = {
+            (sid, token[ID][0]): _fnbr_type_from_misc(token.get(MISC, '_'))
+            for sid, sentence in enumerate(gold_sentences) for token in sentence
+            if len(token[ID]) == 1
+        }
         for batch in DataLoader(data_set, batch_size=self._config.batch_size,
                                 shuffle=False, collate_fn=data_set.collate_fn):
             batch_size = len(batch.word_num)
@@ -574,7 +585,12 @@ class TPipeline:
                     # deprel
                     data_set.conllu_doc[sentid][wordid][DEPREL] = pred_tokens[bid][i][1]
                     if predicted_lemma_types is not None:
-                        data_set.conllu_doc[sentid][wordid][FNBR_TYPE_CANDIDATES] = predicted_lemma_types[bid][i]
+                        ranking = predicted_lemma_types[bid][i]
+                        data_set.conllu_doc[sentid][wordid][FNBR_TYPE_CANDIDATES] = ranking
+                        gold_type = gold_by_position.get((sentid, wordid), '_')
+                        if gold_type != '_':
+                            gold_types.append(gold_type)
+                            predicted_types.append(ranking[0]['type'])
 
         progress.close()
         pred_conllu_fpath = os.path.join(self._config._save_dir, 'preds',
@@ -583,6 +599,17 @@ class TPipeline:
         CoNLL.dict2conll(doc, pred_conllu_fpath)
         score = get_ud_score(pred_conllu_fpath, data_set.gold_conllu)
         score['epoch'] = epoch
+        if gold_types:
+            f1s = []
+            for label in FNBR_TYPES:
+                tp = sum(g == p == label for g, p in zip(gold_types, predicted_types))
+                fp = sum(g != label and p == label for g, p in zip(gold_types, predicted_types))
+                fn = sum(g == label and p != label for g, p in zip(gold_types, predicted_types))
+                if tp + fn:
+                    f1s.append(2 * tp / (2 * tp + fp + fn))
+            score['fnbr_macro_f1'] = sum(f1s) / len(f1s)
+        else:
+            score['fnbr_macro_f1'] = 0.0
         return score, pred_conllu_fpath
 
     def _train_lemma(self):

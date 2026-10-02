@@ -4,7 +4,7 @@ from trankit_fnbr.repository import InMemoryLexiconRepository
 
 
 def token(token_id: int, text: str, upos: str, start: int, end: int) -> ParsedToken:
-    return ParsedToken(token_id, text, text.lower(), upos, "_", "_", 0, "dep", start, end)
+    return ParsedToken(token_id, text, text.lower(), upos, "_", "_", token_id - 1, "dep", start, end)
 
 
 def test_processor_keeps_lattice_and_selects_longest_reviewed_mwe() -> None:
@@ -67,6 +67,20 @@ def test_constructions_remain_lattice_evidence_without_replacing_lexical_units()
         for item in result.selected
     ] == [(1, 3, 30)]
     assert any(item.source == "construction" for item in result.lattice)
+
+
+def test_disconnected_mwe_remains_evidence_but_is_not_selected() -> None:
+    repo = InMemoryLexiconRepository(
+        "fixture", {}, [Pattern(99, "a b", "a b", "connection", reviewed=True)]
+    )
+    tokens = [
+        ParsedToken(1, "a", "a", "X", "_", "_", 3, "dep", 0, 1),
+        ParsedToken(2, "b", "b", "X", "_", "_", 3, "dep", 2, 3),
+        ParsedToken(3, "c", "c", "X", "_", "_", 0, "root", 4, 5),
+    ]
+    analysis = LexicalProcessor(repo).process(tokens)
+    assert any(item.id.startswith("lemma:99:") for item in analysis.lattice)
+    assert [item.text for item in analysis.selected] == ["a", "b", "c"]
 
 
 def test_processor_matches_optional_groups_and_pos_alternatives() -> None:

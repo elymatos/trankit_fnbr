@@ -1,8 +1,9 @@
+from dataclasses import replace
 from typing import Any, Dict, List, Protocol, Sequence, Tuple
 
 from .domain import LexicalToken, ParsedToken
 from .lexical import LexicalProcessor
-from .projection import project_dependencies
+from .projection import project_dependencies, validate_projected_tree
 
 
 class UDParser(Protocol):
@@ -44,7 +45,11 @@ class AnalysisPipeline:
         lexical_processor: LexicalProcessor,
         type_predictor: LemmaTypePredictor,
         database_schema_version: str,
+        scaffold_source: str = "projected",
     ) -> None:
+        if scaffold_source not in {"projected", "model"}:
+            raise ValueError("scaffold_source must be 'projected' or 'model'")
+        self.scaffold_source = scaffold_source
         self.parser = parser
         self.lexical_processor = lexical_processor
         self.type_predictor = type_predictor
@@ -55,12 +60,28 @@ class AnalysisPipeline:
         for parsed_tokens in self.parser.parse(text):
             lexical = self.lexical_processor.process(parsed_tokens)
             projected = project_dependencies(parsed_tokens, lexical.selected)
-            predictions = self.type_predictor.predict(lexical.selected, top_k)
+            model_dependencies = None
+            if self.scaffold_source == "model":
+                predict_with_scaffold = getattr(self.type_predictor, "predict_with_scaffold", None)
+                if not callable(predict_with_scaffold):
+                    raise ValueError("model scaffold requires a joint FNBr predictor")
+                predictions, model_dependencies = predict_with_scaffold(lexical.selected, top_k)
+                if len(model_dependencies) != len(projected):
+                    raise ValueError("FNBr model returned the wrong dependency count")
+                validate_projected_tree([
+                    replace(token, head=head, deprel=deprel)
+                    for token, (head, deprel) in zip(projected, model_dependencies)
+                ])
+            else:
+                predictions = self.type_predictor.predict(lexical.selected, top_k)
             if len(predictions) != len(projected):
                 raise ValueError("lemma-type predictor returned the wrong token count")
             tokens = []
-            for dependency, lexical_token, candidates in zip(projected, lexical.selected, predictions):
-                tokens.append({
+            for index, (dependency, lexical_token, candidates) in enumerate(
+                    zip(projected, lexical.selected, predictions)):
+                head, deprel = (model_dependencies[index] if model_dependencies is not None
+                                else (dependency.head, dependency.deprel))
+                item = {
                     "id": dependency.id,
                     "lexical_token_id": lexical_token.id,
                     "text": lexical_token.text,
@@ -76,18 +97,23 @@ class AnalysisPipeline:
                         {"type": lemma_type, "probability": probability}
                         for lemma_type, probability in candidates[:top_k]
                     ],
-                    "head": dependency.head,
-                    "deprel": dependency.deprel,
+                    "head": head,
+                    "deprel": deprel,
                     "source_token_ids": list(dependency.source_token_ids),
                     "start_char": lexical_token.start_char,
                     "end_char": lexical_token.end_char,
-                })
+                }
+                if model_dependencies is not None:
+                    item["projected_head"] = dependency.head
+                    item["projected_deprel"] = dependency.deprel
+                tokens.append(item)
             sentences.append({
                 "tokens": tokens,
                 "lattice": [self._lattice_item(candidate) for candidate in lexical.lattice],
             })
         return {
             "model_version": self.type_predictor.model_version,
+            "scaffold_source": self.scaffold_source,
             "parser_model_version": self.parser.model_version,
             "lexical_policy_version": self.lexical_processor.policy_version,
             "database_schema_version": self.database_schema_version,

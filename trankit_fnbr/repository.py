@@ -8,6 +8,9 @@ class LexiconRepository(Protocol):
     def revision(self) -> str:
         ...
 
+    def check_connection(self) -> None:
+        ...
+
     def lemmas_for(self, form: str, upos: str, language: str) -> Sequence[Lemma]:
         ...
 
@@ -29,6 +32,9 @@ class InMemoryLexiconRepository:
     @property
     def revision(self) -> str:
         return self._revision
+
+    def check_connection(self) -> None:
+        pass
 
     def lemmas_for(self, form: str, upos: str, language: str) -> Sequence[Lemma]:
         candidates = self._forms.get(form.casefold(), ())

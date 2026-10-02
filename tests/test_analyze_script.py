@@ -35,6 +35,24 @@ def test_analyze_script_prints_pipeline_result(monkeypatch, capsys) -> None:
     assert "analyzer diagnostic" in captured.err
 
 
+def test_analyze_script_selects_joint_checkpoint_and_model_scaffold(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("FNBR_DATABASE_URL", "mysql+pymysql://fixture")
+    monkeypatch.setenv("FNBR_LEXICON_REVISION", "fixture")
+    monkeypatch.setenv("FNBR_SCAFFOLD_SOURCE", "projected")
+    monkeypatch.setenv("FNBR_TRANKIT_CACHE_DIR", "./cache/fnbr")
+
+    def build(predictor_mode):
+        assert predictor_mode == "model"
+        assert analyze.os.environ["FNBR_SCAFFOLD_SOURCE"] == "model"
+        assert analyze.os.environ["FNBR_TRANKIT_CACHE_DIR"] == "cache/fnbr-joint"
+        return FakePipeline()
+
+    monkeypatch.setattr(analyze, "build_pipeline", build)
+    analyze.main(["texto", "--predictor", "model", "--scaffold-source", "model",
+                  "--fnbr-cache-dir", "./cache/fnbr-joint"])
+    assert json.loads(capsys.readouterr().out)["sentence"] == "texto"
+
+
 def test_analyze_script_explains_missing_database_configuration(
     monkeypatch, capsys
 ) -> None:

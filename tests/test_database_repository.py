@@ -35,6 +35,10 @@ def test_repository_reads_typed_lemmas_and_patterns() -> None:
         (41, "em primeiro lugar")
     ]
     assert repository.revision == "snapshot-7"
+    repository.check_connection()
+    repository.prefetch_forms(["Portanto", "portanto", "missing"], "pt")
+    assert [lemma.id for lemma in repository.lemmas_for("PORTANTO", "ADV", "pt")] == [40]
+    assert repository.lemmas_for("missing", "NOUN", "pt") == ()
 
 
 def test_repository_fails_fast_for_unsupported_schema() -> None:

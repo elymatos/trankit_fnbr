@@ -1,6 +1,22 @@
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Mapping, Sequence
 
 from .domain import ParsedToken
+
+
+def contraction_anchor(ids: Sequence[int], heads: Mapping[int, int]) -> int:
+    """Choose an external anchor whose redirected head cannot create a cycle."""
+    components = set(ids)
+    for word in ids:
+        if heads[word] in components:
+            continue
+        current = heads[word]
+        visited = set()
+        while current and current not in visited and current not in components:
+            visited.add(current)
+            current = heads.get(current, 0)
+        if current not in components:
+            return word
+    raise ValueError("contraction has no cycle-free external syntactic anchor")
 
 
 class TrankitUDParser:
@@ -54,9 +70,11 @@ class TrankitUDParser:
                 component_ids = {int(component["id"]) for component in expanded}
                 for component_id in component_ids:
                     component_to_surface[component_id] = surface_id
-                anchors = [component for component in expanded
-                           if int(component.get("head", 0)) not in component_ids]
-                anchor = anchors[0] if anchors else expanded[0]
+                heads = {int(word["id"]): int(word.get("head", 0))
+                         for item in tokens for word in (item.get("expanded") or
+                         item.get("expanded_tokens") or [item]) if isinstance(word.get("id"), int)}
+                anchor_id = contraction_anchor(sorted(component_ids), heads)
+                anchor = next(word for word in expanded if int(word["id"]) == anchor_id)
                 collapsed = dict(anchor)
                 collapsed.update({
                     "id": surface_id,

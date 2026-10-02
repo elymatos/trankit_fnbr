@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from trankit_fnbr.converter import convert_conllu
@@ -21,6 +23,7 @@ def main() -> None:
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--allow-other-split", action="store_true")
     args = parser.parse_args()
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
     if not args.allow_other_split and not args.source.name.startswith("h8418_0_"):
         parser.error("the first experiment is restricted to the h8418_0 split")

@@ -1,7 +1,10 @@
+import pytest
+
 from trankit_fnbr.domain import Lemma, ParsedToken, Pattern
 from trankit_fnbr.lexical import LexicalProcessor
 from trankit_fnbr.pipeline import AnalysisPipeline
 from trankit_fnbr.repository import InMemoryLexiconRepository
+from trankit_fnbr.projection import ProjectionError
 
 
 class FakeParser:
@@ -51,3 +54,32 @@ def test_pipeline_orchestrates_parse_lookup_selection_typing_and_projection() ->
         {"type": "focus", "probability": 0.2},
     ]
     assert result["sentences"][0]["tokens"][1]["head"] == 0
+    assert result["scaffold_source"] == "projected"
+
+
+def test_joint_model_scaffold_preserves_projected_provenance() -> None:
+    class JointPredictor(FakeTypePredictor):
+        def predict_with_scaffold(self, lexical_tokens, top_k):
+            return self.predict(lexical_tokens, top_k), [(0, "root"), (1, "dep")]
+
+    pipeline = AnalysisPipeline(
+        FakeParser(), LexicalProcessor(InMemoryLexiconRepository("r1", {}, [])),
+        JointPredictor(), "webtool45", scaffold_source="model"
+    )
+    result = pipeline.analyze("Não chegou")
+    tokens = result["sentences"][0]["tokens"]
+    assert result["scaffold_source"] == "model"
+    assert [(token["head"], token["projected_head"]) for token in tokens] == [(0, 2), (1, 0)]
+
+
+def test_joint_model_scaffold_rejects_invalid_predictions() -> None:
+    class InvalidJointPredictor(FakeTypePredictor):
+        def predict_with_scaffold(self, lexical_tokens, top_k):
+            return self.predict(lexical_tokens, top_k), [(2, "dep"), (1, "dep")]
+
+    pipeline = AnalysisPipeline(
+        FakeParser(), LexicalProcessor(InMemoryLexiconRepository("r1", {}, [])),
+        InvalidJointPredictor(), "webtool45", scaffold_source="model"
+    )
+    with pytest.raises(ProjectionError, match="root"):
+        pipeline.analyze("Não chegou")

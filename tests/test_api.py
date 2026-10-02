@@ -40,6 +40,29 @@ def test_raw_text_endpoint_returns_versioned_fnbr_analysis() -> None:
     assert payload["sentences"][0]["tokens"][0]["selected_lemma_id"] == 8
 
 
+def test_health_endpoints_do_not_run_analysis() -> None:
+    class ReadyPipeline(FakePipeline):
+        def ready(self):
+            return {"status": "ready", "model_version": "joint-fixture"}
+
+    client = TestClient(create_app(ReadyPipeline()))
+    assert client.get("/health/live").json() == {"status": "alive"}
+    response = client.get("/health/ready")
+    assert response.status_code == 200
+    assert response.json()["model_version"] == "joint-fixture"
+
+
+def test_readiness_returns_503_without_exposing_database_errors() -> None:
+    class UnavailablePipeline(FakePipeline):
+        def ready(self):
+            raise ConnectionError("secret database host")
+
+    client = TestClient(create_app(UnavailablePipeline()))
+    response = client.get("/health/ready")
+    assert response.status_code == 503
+    assert "secret" not in response.text
+
+
 def test_raw_text_endpoint_rejects_blank_text() -> None:
     client = TestClient(create_app(FakePipeline()))
 

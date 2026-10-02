@@ -1,0 +1,2 @@
+# The container runs CPU inference; avoid downloading CUDA runtime wheels.
+torch==2.0.1+cpu

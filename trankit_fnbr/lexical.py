@@ -152,9 +152,14 @@ class LexicalProcessor:
     def _select(
         self, lattice: Sequence[LexicalToken], tokens: Sequence[ParsedToken]
     ) -> List[LexicalToken]:
+        by_id = {token.id: token for token in tokens}
         lexical_candidates = [
             candidate for candidate in lattice
             if candidate.source not in {"ordinary", "construction"}
+            # A span with multiple external UD heads cannot be collapsed to a
+            # single lexical node without inventing a syntactic attachment.
+            and sum(by_id[word].head not in candidate.components
+                    for word in candidate.components) == 1
         ]
         lexical_candidates.sort(key=lambda candidate: (
             -int(candidate.reviewed),

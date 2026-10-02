@@ -1,5 +1,8 @@
+import hashlib
+import json
 import os
 import threading
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from sqlalchemy import create_engine, event
@@ -39,7 +42,23 @@ def create_read_only_engine(database_url: str):
     return engine
 
 
+def require_joint_checkpoint(cache_dir: str, embedding: str, language: str) -> None:
+    model_dir = Path(cache_dir) / embedding / language
+    metadata_path = model_dir / "fnbr.training.json"
+    if not metadata_path.is_file():
+        raise ValueError("model scaffold requires joint checkpoint metadata: {}".format(metadata_path))
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    checkpoint = model_dir / "{}.tagger.mdl".format(language)
+    if metadata.get("objectives") != "joint" or not checkpoint.is_file():
+        raise ValueError("model scaffold requires a jointly trained FNBr checkpoint")
+    if hashlib.sha256(checkpoint.read_bytes()).hexdigest() != metadata.get("checkpoint_sha256"):
+        raise ValueError("FNBr checkpoint does not match its training metadata")
+
+
 def build_pipeline(predictor_mode: str = "model") -> AnalysisPipeline:
+    scaffold_source = os.getenv("FNBR_SCAFFOLD_SOURCE", "projected")
+    if scaffold_source == "model" and predictor_mode != "model":
+        raise ValueError("model scaffold requires a joint FNBr checkpoint")
     database_url = os.environ["FNBR_DATABASE_URL"]
     revision = os.environ["FNBR_LEXICON_REVISION"]
     engine = create_read_only_engine(database_url)
@@ -60,6 +79,8 @@ def build_pipeline(predictor_mode: str = "model") -> AnalysisPipeline:
     elif predictor_mode == "model":
         fnbr_language = os.getenv("FNBR_TRANKIT_LANGUAGE", "customized")
         fnbr_cache = os.getenv("FNBR_TRANKIT_CACHE_DIR", "./cache/fnbr")
+        if scaffold_source == "model":
+            require_joint_checkpoint(fnbr_cache, embedding, fnbr_language)
         fnbr = Pipeline(
             lang=fnbr_language, cache_dir=fnbr_cache, gpu=gpu, embedding=embedding
         )
@@ -77,6 +98,7 @@ def build_pipeline(predictor_mode: str = "model") -> AnalysisPipeline:
         lexical_processor=LexicalProcessor(repository),
         type_predictor=type_predictor,
         database_schema_version=repository.schema_version,
+        scaffold_source=scaffold_source,
     )
 
 
@@ -97,6 +119,22 @@ class LazyConfiguredPipeline:
                         )
                     except SQLAlchemyError as error:
                         raise ConnectionError("FNBr database is unavailable") from error
+
+    def ready(self) -> Dict[str, str]:
+        self.initialize()
+        assert self._pipeline is not None
+        repository = self._pipeline.lexical_processor.repository
+        try:
+            repository.check_connection()
+        except SQLAlchemyError as error:
+            raise ConnectionError("FNBr database is unavailable") from error
+        return {
+            "status": "ready",
+            "model_version": self._pipeline.type_predictor.model_version,
+            "scaffold_source": self._pipeline.scaffold_source,
+            "database_schema_version": self._pipeline.database_schema_version,
+            "lexicon_revision": repository.revision,
+        }
 
     def analyze(self, text: str, top_k: int = 3) -> Dict[str, Any]:
         self.initialize()

@@ -179,6 +179,8 @@ def get_output_doc(tokenized_doc, conllu_doc):
                     tmp[HEAD] = word[HEAD]
                 if DEPREL in word and word[DEPREL] != '_':
                     tmp[DEPREL] = word[DEPREL]
+                if FNBR_TYPE_CANDIDATES in word:
+                    tmp[FNBR_TYPE_CANDIDATES] = word[FNBR_TYPE_CANDIDATES]
                 for k, v in tokenized_doc[sent_id][TOKENS][len(out_sent)].items():
                     if k not in tmp:
                         tmp[k] = v
@@ -195,6 +197,8 @@ def get_output_doc(tokenized_doc, conllu_doc):
                     out_sent[-1][EXPANDED][expand_id][HEAD] = word[HEAD]
                 if DEPREL in word and word[DEPREL] != '_':
                     out_sent[-1][EXPANDED][expand_id][DEPREL] = word[DEPREL]
+                if FNBR_TYPE_CANDIDATES in word:
+                    out_sent[-1][EXPANDED][expand_id][FNBR_TYPE_CANDIDATES] = word[FNBR_TYPE_CANDIDATES]
 
         tokenized_doc[sent_id][TOKENS] = out_sent
     return tokenized_doc

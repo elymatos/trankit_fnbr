@@ -230,13 +230,16 @@ curl -s http://localhost:8000/fnbr/ \
     </div>
 
     <h3>5.4 Docker container</h3>
-    <p>Create the deployment configuration first. Set a real read-only database URL and identifiable lexicon revision. Keep <code>FNBR_PREDICTOR_MODE=lexical</code> unless a trained FNBr checkpoint is present under the mounted cache.</p>
+    <p>Create the deployment configuration first. Set a real read-only database URL and identifiable lexicon revision. For the jointly trained checkpoint, use <code>FNBR_PREDICTOR_MODE=model</code>, <code>FNBR_SCAFFOLD_SOURCE=model</code>, and <code>FNBR_TRANKIT_CACHE_DIR=./cache/fnbr-joint</code>. The mounted cache must contain the Portuguese Trankit model and the customized joint checkpoint with <code>fnbr.training.json</code>.</p>
     <pre><code>cp .env.example .env
 # Edit .env before continuing.
 
 docker compose up --build -d
 docker compose logs -f trankit-fnbr</code></pre>
-    <p>The Compose service publishes container port 80 as <code>localhost:8405</code> and mounts <code>./cache</code> at <code>/code/cache</code>, so downloaded models survive container replacement. In another terminal:</p>
+    <p>The Compose service publishes container port 80 as <code>127.0.0.1:8405</code> (configurable via <code>FNBR_HTTP_BIND</code>/<code>FNBR_HTTP_PORT</code>) and mounts <code>./cache</code> at <code>/code/cache</code>. It uses the project Conda environment and a single CPU worker. In another terminal:</p>
+    <pre><code>curl -s http://localhost:8405/health/ready
+conda run -n trankit-fnbr python scripts/smoke_http.py</code></pre>
+    <p>Readiness checks the loaded model and database connection; liveness is <code>/health/live</code>. Do not bind to an external address without TLS and authentication at a trusted reverse proxy.</p>
     <pre><code>curl -s http://localhost:8405/fnbr/ \
   -H 'Content-Type: application/json' \
   -d '{"text":"ele tomou o café da manhã logo cedo","top_k":3}'</code></pre>
@@ -316,13 +319,13 @@ result = fnbr_parser.posdep(
     <h2>7. Current boundaries and pending choices</h2>
     <ul>
       <li>The contextual predictor runs after lexical sequence selection and does not currently feed its probabilities back into lemma or MWE selection.</li>
-      <li>The second Trankit pass's dependency predictions are not used by <code>AnalysisPipeline</code>.</li>
+      <li>When <code>FNBR_SCAFFOLD_SOURCE=model</code>, the second Trankit pass supplies lexical-unit dependencies and the projected first-pass dependencies remain available as provenance. Only use this option with the jointly trained checkpoint; type-only checkpoints have untrained dependency weights.</li>
       <li>The HTTP endpoint currently selects model mode at startup; lexical/model mode is selectable only through the local or Python interfaces.</li>
       <li>The Python pattern matcher covers the implemented pattern subset. Construction matches are diagnostic lattice evidence rather than selected lexical units.</li>
       <li>A genuine lexicon revision must replace the example <code>webtool45-YYYYMMDD</code> value before output is considered reproducible.</li>
     </ul>
     <div class="note">
-      <strong>Decision point:</strong> the deterministic lexical projection is sufficient for the baseline goal of returning FNBr lexical units, lexical types, and a dependency scaffold. Dataset conversion and a second trained pass become necessary only if contextual disambiguation or learned lexical-unit dependencies are required and shown to improve this baseline.
+      <strong>Decision point:</strong> the deterministic projection remains the baseline. The joint model was trained on automatically projected dependencies and provisional lemma-type labels; its attachments are a learned syntactic scaffold, not a semantic dependency grammar. Contextual disambiguation still needs independently reviewed ambiguous occurrences for evaluation.
     </div>
   </section>
 

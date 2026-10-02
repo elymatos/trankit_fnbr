@@ -67,13 +67,20 @@ class Pipeline:
         self.added_langs = [lang]
         assert lang in lang2treebank, f'{lang} has not been supported. Currently supported languages: {list(lang2treebank.keys())}'
 
-        # download saved model for initial language
-        download(
-            cache_dir=self._config._cache_dir,
-            language=lang,
-            saved_model_version=saved_model_version,  # manually set this to avoid duplicated storage
-            embedding_name=self.master_config.embedding_name
-        )
+        # A customized POS/dependency checkpoint is trained locally; upstream
+        # has no downloadable customized.zip (and type-only runs have no tokenizer).
+        if lang == 'customized':
+            model_dir = os.path.join(self._config._cache_dir, embedding, lang)
+            for filename in ('customized.vocabs.json', 'customized.tagger.mdl'):
+                if not os.path.isfile(os.path.join(model_dir, filename)):
+                    raise FileNotFoundError(os.path.join(model_dir, filename))
+        else:
+            download(
+                cache_dir=self._config._cache_dir,
+                language=lang,
+                saved_model_version=saved_model_version,
+                embedding_name=self.master_config.embedding_name
+            )
 
         # load ALL vocabs
         self._load_vocabs()
@@ -90,11 +97,12 @@ class Pipeline:
 
         # tokenizers
         self._tokenizer = {}
-        self._tokenizer[lang] = TokenizerClassifier(self._config, treebank_name=lang2treebank[lang])
-        self._tokenizer[lang].to(self._config.device)
-        if self._use_gpu:
-            self._tokenizer[lang].half()
-        self._tokenizer[lang].eval()
+        if lang != 'customized':
+            self._tokenizer[lang] = TokenizerClassifier(self._config, treebank_name=lang2treebank[lang])
+            self._tokenizer[lang].to(self._config.device)
+            if self._use_gpu:
+                self._tokenizer[lang].half()
+            self._tokenizer[lang].eval()
 
         # taggers
         self._tagger = {}
@@ -107,12 +115,13 @@ class Pipeline:
         # mwt and lemma:
         self._mwt_model = {}
         treebank_name = lang2treebank[lang]
-        if tbname2training_id[treebank_name] % 2 == 1:
+        if lang != 'customized' and tbname2training_id[treebank_name] % 2 == 1:
             self._mwt_model[lang] = MWTWrapper(self._config, treebank_name=treebank_name, use_gpu=self._use_gpu)
 
         self._lemma_model = {}
         treebank_name = lang2treebank[lang]
-        self._lemma_model[lang] = LemmaWrapper(self._config, treebank_name=treebank_name, use_gpu=self._use_gpu)
+        if lang != 'customized':
+            self._lemma_model[lang] = LemmaWrapper(self._config, treebank_name=treebank_name, use_gpu=self._use_gpu)
 
         # ner if available
         self._ner_model = {}

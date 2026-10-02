@@ -61,11 +61,11 @@ def project_dependencies(
             lexical_token_id=lexical.id,
             source_token_ids=lexical.components,
         ))
-    _validate_tree(result)
+    validate_projected_tree(result)
     return result
 
 
-def _validate_tree(tokens: Sequence[ProjectedToken]) -> None:
+def validate_projected_tree(tokens: Sequence[ProjectedToken]) -> None:
     roots = [token.id for token in tokens if token.head == 0]
     if len(roots) != 1:
         raise ProjectionError("projected tree must have exactly one root")

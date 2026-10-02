@@ -36,10 +36,21 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "model uses the configured contextual FNBr checkpoint"
         ),
     )
+    parser.add_argument("--scaffold-source", choices=("projected", "model"),
+                        help="use projected UD or dependencies from a joint FNBr checkpoint")
+    parser.add_argument("--fnbr-cache-dir", type=Path,
+                        help="FNBr checkpoint cache (e.g. ./cache/fnbr-joint)")
+    parser.add_argument("--model-version", help="version shown in model-mode output")
     parser.add_argument("--compact", action="store_true", help="print compact JSON")
     args = parser.parse_args(argv)
 
     load_dotenv(PROJECT_ROOT / ".env")
+    if args.scaffold_source:
+        os.environ["FNBR_SCAFFOLD_SOURCE"] = args.scaffold_source
+    if args.fnbr_cache_dir:
+        os.environ["FNBR_TRANKIT_CACHE_DIR"] = str(args.fnbr_cache_dir)
+    if args.model_version:
+        os.environ["FNBR_MODEL_VERSION"] = args.model_version
     missing = [
         name for name in ("FNBR_DATABASE_URL", "FNBR_LEXICON_REVISION")
         if not os.getenv(name)
