@@ -272,7 +272,7 @@ The first training run used the Porttinari `h8418_0` split enriched with FNBr le
 | Role | Path | Notes |
 |---|---|---|
 | Source corpus | `datasets/h8418_0_{train,dev,test}.conllu` | Copied from Portparser; train SHA-256 `9724e9ba…f4b8` |
-| Converted data | `outputs/h8418_0_{train,dev,test}.fnbr.conllu` | Train `ff80dcee…fcb3`, dev `ad23d269…f04a` |
+| Converted data | `outputs/h8418_0_{train,dev,test}.fnbr.conllu` | Train `ff80dcee…fcb3`, dev `ad23d269…f04a`; version-controlled copy in `datasets/fnbr/` |
 | Conversion provenance | `outputs/h8418_0_*.fnbr.conllu.manifest.json` | Commit `4290f93`, converter `0.1.0`, lexical policy `1`, schema `webtool45`, lexicon revision `202610021100` |
 | Test metrics | `outputs/h8418_0_test.metrics.json`, `outputs/h8418_0_test.joint.metrics.json` | Type-only and joint checkpoints |
 | Checkpoints | `cache/fnbr/…/customized/` (type-only), `cache/fnbr-joint/…/customized/` (joint) | `fnbr.training.json` records objectives, epoch, checkpoint SHA-256, and the converted-data hashes |
@@ -287,7 +287,7 @@ Label counts produced by the `unique_typed_lemma_provisional` policy:
 
 Resolved labels are provisional: each is the type of a uniquely selected, typed lemma, not an independently reviewed occurrence label. The lexicon revision is a timestamp of a live database read, not an immutable snapshot (§9.3).
 
-`outputs/` and `cache/` are not version-controlled. Training ran on a separate GPU host; copy these files with their manifests whenever a checkpoint is moved, so the hashes in `fnbr.training.json` remain verifiable.
+`outputs/` and `cache/` are not version-controlled; `datasets/fnbr/` keeps a copy of the converted CoNLL-U files for label review, without the manifests, which are too large for GitHub (up to 186 MB). Training ran on a separate GPU host; copy these files with their manifests whenever a checkpoint is moved, so the hashes in `fnbr.training.json` remain verifiable.
 
 ## 8. Runtime API
 
