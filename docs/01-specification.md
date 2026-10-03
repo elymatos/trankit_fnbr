@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft for the first FNBr-specific Trankit extension.
+Draft for the first FNBr-specific Trankit extension. Stages 1–6 of §10.1 have been run once on the `h8418_0` split; §7.7 records the training data and §10.4 the measured results. Stage 7 (disambiguation benefit) remains open.
 
 This specification supersedes prior implementation assumptions that made WebTool part of the runtime pipeline. WebTool remains a reference for existing FNBr lexical-processing behavior, but `trankit_fnbr` implements and owns that behavior in Python.
 
@@ -263,6 +263,32 @@ Example:
 
 The Trankit FNBr reader must explicitly load `FNBRType` from MISC. CoNLL-U tools that do not know the extension can still read the projected tree.
 
+Tokens without an ordinary gold label carry `FNBRStatus=ambiguous` or `FNBRStatus=unresolved` in MISC instead of `FNBRType`. They stay in the projected tree, so they still count for dependency training, but are masked from type loss and type metrics.
+
+### 7.7 Current training data
+
+The first training run used the Porttinari `h8418_0` split enriched with FNBr lemma types by `scripts/convert_dataset.py`. Conversion adds no new sentences and translates nothing between languages. It runs the runtime lexical processor over each Portuguese sentence, collapses selected MWEs, projects the UD tree, and writes the selected lemma's type into MISC.
+
+| Role | Path | Notes |
+|---|---|---|
+| Source corpus | `datasets/h8418_0_{train,dev,test}.conllu` | Copied from Portparser; train SHA-256 `9724e9ba…f4b8` |
+| Converted data | `outputs/h8418_0_{train,dev,test}.fnbr.conllu` | Train `ff80dcee…fcb3`, dev `ad23d269…f04a` |
+| Conversion provenance | `outputs/h8418_0_*.fnbr.conllu.manifest.json` | Commit `4290f93`, converter `0.1.0`, lexical policy `1`, schema `webtool45`, lexicon revision `202610021100` |
+| Test metrics | `outputs/h8418_0_test.metrics.json`, `outputs/h8418_0_test.joint.metrics.json` | Type-only and joint checkpoints |
+| Checkpoints | `cache/fnbr/…/customized/` (type-only), `cache/fnbr-joint/…/customized/` (joint) | `fnbr.training.json` records objectives, epoch, checkpoint SHA-256, and the converted-data hashes |
+
+Label counts produced by the `unique_typed_lemma_provisional` policy:
+
+| Split | Sentences | Resolved | Ambiguous | Unresolved |
+|---|---|---|---|---|
+| train | 5,893 | 71,875 | 14,950 | 20,875 |
+| dev | 842 | 10,341 | 2,204 | 2,953 |
+| test | 1,683 | 23,168 | 4,369 | 3,990 |
+
+Resolved labels are provisional: each is the type of a uniquely selected, typed lemma, not an independently reviewed occurrence label. The lexicon revision is a timestamp of a live database read, not an immutable snapshot (§9.3).
+
+`outputs/` and `cache/` are not version-controlled. Training ran on a separate GPU host; copy these files with their manifests whenever a checkpoint is moved, so the hashes in `fnbr.training.json` remain verifiable.
+
 ## 8. Runtime API
 
 The primary endpoint accepts raw text. A caller does not need to know the FNBr database schema, identify lexical candidates, resolve overlapping MWEs, or construct a pre-tokenized lexical sequence.
@@ -322,6 +348,8 @@ The service must fail clearly when the database is unavailable, the schema versi
 6. Train jointly with projected dependency prediction only after the type-only baseline is measured.
 7. Evaluate whether top-k predictions improve contextual lemma-candidate ranking inside the self-contained pipeline.
 
+Progress: stages 1–6 are implemented. The type-only baseline (stage 5) and the joint type/POS/dependency model (stage 6) were both trained on converted `h8418_0` with xlm-roberta-large, 5 epochs, and batch size 4. The type-only checkpoint was selected by development FNBr macro-F1; the joint checkpoint by Trankit's average development CoNLL-U score, which does not include the FNBr head (`trankit/trankit/tpipeline.py`). Stage 7 has not been evaluated.
+
 ### 10.2 Required metrics
 
 Report:
@@ -349,6 +377,29 @@ Proceed to semantic dependency labels or frame matching only when:
 - type metrics are reported by category, not merely globally;
 - uncertainty is exposed in the pipeline response;
 - type prediction demonstrably improves contextual lemma disambiguation or otherwise supplies useful downstream evidence.
+
+### 10.4 First measured results
+
+Test split `h8418_0_test`: 1,683 sentences, 23,168 labeled tokens. Ambiguous and unresolved tokens are excluded from type metrics. UAS/LAS include punctuation and are measured against the automatically projected tree.
+
+| Checkpoint | Epoch | Accuracy | Macro-F1 | Conceptual/procedural F1 | Top-2 recall | Top-3 recall | UAS | LAS |
+|---|---|---|---|---|---|---|---|---|
+| Type-only (`cache/fnbr`) | 1 | 0.888 | 0.889 | 0.927 | 0.929 | 0.944 | — | — |
+| Joint (`cache/fnbr-joint`) | 3 | 0.874 | 0.880 | 0.898 | 0.931 | 0.956 | 0.929 | 0.905 |
+
+Joint per-type F1 is 0.96–0.99 for `event`, `reference`, `polarity`, `degree`, `focus`, and `predication`, but lower for:
+
+| Type | F1 | Support | Observation |
+|---|---|---|---|
+| `connection` | 0.657 | 3,860 | Recall 0.49; 1,857 gold `connection` tokens are predicted as `object` |
+| `interaction` | 0.667 | 4 | Too few examples to evaluate |
+| `quality` | 0.812 | 619 | Recall 0.74 |
+| `object` | 0.819 | 5,437 | Precision 0.71, mostly from absorbed `connection` tokens |
+| `role` | 0.826 | 640 | Recall 0.75 |
+
+The `connection`/`object` confusion is the main error and should be checked against the provisional labels before further training; for example, the converted train data labels the contraction `do` as `object` in some sentences.
+
+These results do not satisfy the decision gate in §10.3: no lexical-disambiguation benefit has been measured, and the labels are not reviewed.
 
 ## 11. Implementation work packages
 
@@ -393,13 +444,13 @@ Proceed to semantic dependency labels or frame matching only when:
 
 ## 12. Open questions
 
-1. Which deployed FNBr database engine, schema version, and tables are authoritative for this project?
+1. Which deployed FNBr database engine, schema version, and tables are authoritative for this project? *(Partly answered: MariaDB, schema `webtool45`, mapped in `trankit_fnbr/database.py`.)*
 2. What mechanism identifies an immutable lexicon snapshot for training and a revision for live runtime queries?
 3. What deterministic policy selects among reviewed MWEs, fixed MWEs, variable patterns, constructions, overlapping spans, and unresolved candidates?
 4. Which existing lexical-processing behaviors must be reproduced exactly, and which may be redesigned in the Python implementation?
 5. How should Trankit's wordpiece tokenizer receive multiword lexical units: original spaces, an escaped form, or an adapter-level representation?
 6. Which labels may be generated automatically from the migrated lemma inventory, and which require human review?
-7. Should the first model train all dependency tasks jointly or initially train the new head against frozen/projected syntactic evidence?
+7. Should the first model train all dependency tasks jointly or initially train the new head against frozen/projected syntactic evidence? *(Both were trained; see §10.4. The joint model is deployed, and the type-only model scores slightly higher on type accuracy and macro-F1.)*
 8. How should constructional coercion be represented in training data without making a defeasible lexical type appear incorrect?
 9. How much does contextual type prediction improve same-form/same-POS lemma disambiguation over lexical lookup alone?
 10. Should runtime use a live read replica, a synchronized local lexical snapshot, or support both modes?

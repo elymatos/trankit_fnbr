@@ -103,8 +103,8 @@
 <main>
   <header>
     <h1>Runtime Pipeline and Parser Access</h1>
-    <p class="meta">Trankit FNBr · current behavior at commit <code>0e9a17b</code> · 2026-09-21</p>
-    <p class="lead">This document records what the implementation actually executes, how that differs from the original two-parser plan, and the supported ways to invoke either the complete FNBr pipeline or Trankit directly.</p>
+    <p class="meta">Trankit FNBr · current behavior at commit <code>a07ead5</code> · 2026-10-03</p>
+    <p class="lead">This document records what the implementation actually executes, how that differs from the original two-parser plan, which trained model is deployed and what it was trained on, and the supported ways to invoke either the complete FNBr pipeline or Trankit directly.</p>
   </header>
 
   <nav class="card" aria-label="Contents">
@@ -114,6 +114,7 @@
       <li><a href="#current">Current runtime flow</a></li>
       <li><a href="#modes">Execution modes</a></li>
       <li><a href="#comparison">Original plan versus implementation</a></li>
+      <li><a href="#model">Trained model and training data</a></li>
       <li><a href="#access">Ways to access the parser</a></li>
       <li><a href="#response">Response interpretation</a></li>
       <li><a href="#limitations">Current boundaries</a></li>
@@ -126,13 +127,14 @@
       <strong>The number of Trankit executions depends on the selected mode.</strong>
       The local command defaults to <code>--predictor lexical</code>, which executes Trankit only once on the raw sentence. It then performs direct FNBr database lookup, Python lexical processing, and deterministic dependency projection—without a second Trankit call. If the command is run with <code>--predictor model</code>, it executes Trankit a second time on the selected, pre-tokenized lexical units. No WebTool process or HTTP service is called in either mode.
     </div>
-    <p>The implementation has two type-prediction modes:</p>
+    <p>The implementation has two type-prediction modes and two dependency sources:</p>
     <ul>
       <li><strong>Lexical mode:</strong> one standard Trankit pass; types come from selected FNBr lemmas; dependencies are projected from the first UD tree.</li>
       <li><strong>Model mode:</strong> the same first pass and lexical processing, followed by a second pre-tokenized Trankit FNBr call for contextual type probabilities.</li>
+      <li><strong>Scaffold source</strong> (<code>FNBR_SCAFFOLD_SOURCE</code> or <code>--scaffold-source</code>): <code>projected</code> (default) uses the projected first-pass tree; <code>model</code> uses the second pass's learned dependencies and requires model mode with a jointly trained checkpoint.</li>
     </ul>
     <div class="note warning">
-      <strong>Important:</strong> even in model mode, the current final <code>head</code> and <code>deprel</code> values come from deterministic projection of the first parse. The second Trankit call's dependency predictions are not copied into the response.
+      <strong>Deployed configuration:</strong> the Docker service runs model mode with <code>FNBR_SCAFFOLD_SOURCE=model</code> and the joint checkpoint in <code>cache/fnbr-joint</code>. Its <code>head</code>/<code>deprel</code> come from the second pass, and <code>projected_head</code>/<code>projected_deprel</code> keep the first-pass projection. With <code>projected</code>, the second pass's dependency predictions are discarded.
     </div>
   </section>
 
@@ -147,9 +149,9 @@
       <div class="arrow">↓</div>
       <div class="step"><div class="number">4</div><div><h3>Dependency projection</h3><p><code>project_dependencies()</code> collapses each selected MWE span into one lexical token, keeps the span's external syntactic attachment, redirects external dependents, renumbers the tree, and validates root, connectivity, and acyclicity.</p></div></div>
       <div class="arrow">↓</div>
-      <div class="step"><div class="number">5</div><div><h3>Type evidence</h3><p>Lexical mode derives candidates from FNBr lemma types. Model mode additionally calls the customized Trankit pipeline with the selected token strings and reads its ranked <code>lemma_type_candidates</code>.</p></div></div>
+      <div class="step"><div class="number">5</div><div><h3>Type evidence</h3><p>Lexical mode derives candidates from FNBr lemma types. Model mode additionally calls the customized Trankit pipeline with the selected token strings and reads its ranked <code>lemma_type_candidates</code>. With the <code>model</code> scaffold source, the same call also supplies the lexical-unit <code>head</code> and <code>deprel</code>.</p></div></div>
       <div class="arrow">↓</div>
-      <div class="step"><div class="number">6</div><div><h3>FNBr-aware response</h3><p>The response contains the selected sequence, lexical type, ranked type candidates, projected dependency scaffold, source token/character spans, complete candidate lattice, and model/schema/lexicon provenance.</p></div></div>
+      <div class="step"><div class="number">6</div><div><h3>FNBr-aware response</h3><p>The response contains the selected sequence, lexical type, ranked type candidates, dependency scaffold (projected or learned, identified by <code>scaffold_source</code>), source token/character spans, complete candidate lattice, and model/schema/lexicon provenance.</p></div></div>
     </div>
     <p class="small">Primary implementation: <code>trankit_fnbr/pipeline.py</code>. Runtime assembly: <code>trankit_fnbr/runtime.py</code>.</p>
   </section>
@@ -166,12 +168,12 @@
         <p><strong>Needs:</strong> Portuguese Trankit model, database URL, and lexicon revision. It does not require a trained FNBr checkpoint.</p>
       </article>
       <article class="card">
-        <span class="badge optional">Optional experiment</span>
+        <span class="badge optional">Deployed</span>
         <h3>Model mode</h3>
         <p><strong>Trankit calls:</strong> one raw-text Portuguese call plus one pre-tokenized customized call.</p>
         <p><strong>Type source:</strong> contextual probabilities from the dedicated fifteen-label head.</p>
-        <p><strong>Dependencies:</strong> still projected from the first UD parse in the current orchestrator.</p>
-        <p><strong>Needs:</strong> everything required by lexical mode plus a compatible trained FNBr checkpoint.</p>
+        <p><strong>Dependencies:</strong> projected from the first UD parse by default; learned by the second pass when the scaffold source is <code>model</code>.</p>
+        <p><strong>Needs:</strong> everything required by lexical mode plus a trained FNBr checkpoint. The <code>model</code> scaffold source also requires a joint checkpoint whose <code>fnbr.training.json</code> and checksum validate at startup.</p>
       </article>
     </div>
     <table>
@@ -180,7 +182,7 @@
         <tr><td>Inspect MWE recognition and lexical types</td><td><strong>Lexical</strong></td></tr>
         <tr><td>Produce the deterministic FNBr lexical projection</td><td><strong>Lexical</strong></td></tr>
         <tr><td>Evaluate contextual type probabilities</td><td><strong>Model</strong></td></tr>
-        <tr><td>Evaluate a learned second dependency tree</td><td>Not exposed by the current orchestration; requires a deliberate pipeline change</td></tr>
+        <tr><td>Use the learned lexical-unit dependency tree</td><td><strong>Model</strong> with scaffold source <code>model</code> and the joint checkpoint</td></tr>
       </tbody>
     </table>
   </section>
@@ -193,8 +195,8 @@
         <tr><td>First parser</td><td>Parse raw text to obtain forms, POS, and dependencies.</td><td>Implemented by the standard Portuguese Trankit pass.</td></tr>
         <tr><td>Lexical/MWE service</td><td>Send first-pass output to WebTool for lemma and MWE identification.</td><td>WebTool is not called. Python code reads the FNBr database directly and owns lexical processing.</td></tr>
         <tr><td>Selected units</td><td>Build a token sequence in which recognized MWEs can be single units.</td><td>Implemented as a deterministic projection selected from a retained lexical lattice.</td></tr>
-        <tr><td>Second parser</td><td>Pass selected units as tokens and use its complete parse as the final result.</td><td>Absent in lexical mode. In model mode, pre-tokenized selected units are sent to customized Trankit, but only type probabilities are consumed.</td></tr>
-        <tr><td>Final dependencies</td><td>Learned by the second parser.</td><td>Projected from the first UD tree.</td></tr>
+        <tr><td>Second parser</td><td>Pass selected units as tokens and use its complete parse as the final result.</td><td>Absent in lexical mode. In model mode, pre-tokenized selected units are sent to customized Trankit; its dependencies are used only with the <code>model</code> scaffold source.</td></tr>
+        <tr><td>Final dependencies</td><td>Learned by the second parser.</td><td>Projected from the first UD tree by default; learned by the joint checkpoint when the scaffold source is <code>model</code> (the deployed setting).</td></tr>
         <tr><td>Final type</td><td>Expected from the FNBr-aware second parser.</td><td>Database lexical type in baseline mode; contextual ranked prediction in model mode.</td></tr>
       </tbody>
     </table>
@@ -203,23 +205,72 @@
     </div>
   </section>
 
-  <section id="access">
-    <h2>5. Ways to access the parser</h2>
+  <section id="model">
+    <h2>5. Trained model and training data</h2>
+    <p>The deployed checkpoint was trained on Portuguese text <strong>enriched with FNBr lemma types</strong>. Nothing was translated between languages: <code>scripts/convert_dataset.py</code> ran the runtime lexical processor over each Porttinari sentence, collapsed selected MWEs, projected the UD tree onto the selected lexical units, and wrote the selected lemma's type into MISC as <code>FNBRType=&lt;type&gt;</code>. Tokens without a unique typed lemma are marked <code>FNBRStatus=ambiguous</code> or <code>FNBRStatus=unresolved</code> and excluded from type loss.</p>
+    <pre><code>datasets/h8418_0_{train,dev,test}.conllu          Porttinari source split
+    ↓ scripts/convert_dataset.py  (FNBr database, lexicon revision 202610021100)
+outputs/h8418_0_{train,dev,test}.fnbr.conllu      projected tree + FNBRType labels
+outputs/h8418_0_*.fnbr.conllu.manifest.json       conversion provenance
+    ↓ scripts/train_fnbr.py --joint --epochs 5 --batch-size 4   (GPU host)
+cache/fnbr-joint/xlm-roberta-large/customized/    deployed joint checkpoint
+    ↓ scripts/evaluate_fnbr.py --cache-dir ./cache/fnbr-joint
+outputs/h8418_0_test.joint.metrics.json           held-out test metrics</code></pre>
+    <table>
+      <thead><tr><th>Split</th><th>Sentences</th><th>Resolved (labeled)</th><th>Ambiguous</th><th>Unresolved</th></tr></thead>
+      <tbody>
+        <tr><td>train</td><td>5,893</td><td>71,875</td><td>14,950</td><td>20,875</td></tr>
+        <tr><td>dev</td><td>842</td><td>10,341</td><td>2,204</td><td>2,953</td></tr>
+        <tr><td>test</td><td>1,683</td><td>23,168</td><td>4,369</td><td>3,990</td></tr>
+      </tbody>
+    </table>
+    <h3>Runtime cache layout</h3>
+    <p>Only these files are read at runtime. <code>cache/</code> and <code>outputs/</code> are not version-controlled; copy them from the training host together.</p>
+    <pre><code>cache/trankit/xlm-roberta-large/
+  portuguese/                     standard Portuguese Trankit models (first pass)
+  models--xlm-roberta-large/      XLM-R weights (Hugging Face cache)
+cache/fnbr-joint/xlm-roberta-large/
+  customized/customized.tagger.mdl    trained adapters and heads
+  customized/customized.vocabs.json   label vocabularies, including the FNBr types
+  customized/fnbr.training.json       objectives, epoch, checksum, data hashes
+  models--xlm-roberta-large/          XLM-R weights (Hugging Face cache)</code></pre>
+    <p>At startup with the <code>model</code> scaffold source, <code>require_joint_checkpoint()</code> checks that <code>fnbr.training.json</code> says <code>"objectives": "joint"</code> and that the SHA-256 of <code>customized.tagger.mdl</code> matches it.</p>
+    <h3>Held-out test results</h3>
+    <table>
+      <thead><tr><th>Checkpoint</th><th>Accuracy</th><th>Macro-F1</th><th>Top-3 recall</th><th>UAS / LAS*</th></tr></thead>
+      <tbody>
+        <tr><td>Type-only, epoch 1 (<code>cache/fnbr</code>, not deployed)</td><td>0.888</td><td>0.889</td><td>0.944</td><td>—</td></tr>
+        <tr><td>Joint, epoch 3 (<code>cache/fnbr-joint</code>, deployed)</td><td>0.874</td><td>0.880</td><td>0.956</td><td>0.929 / 0.905</td></tr>
+      </tbody>
+    </table>
+    <p class="small">*Including punctuation, measured against the automatically projected tree.</p>
+    <div class="note warning">
+      <strong>Main weakness:</strong> <code>connection</code> has recall 0.49 (F1 0.66); 1,857 of 3,860 gold <code>connection</code> tokens are predicted as <code>object</code>. Labels are provisional dictionary types, not reviewed occurrence labels, so check this confusion against the labels before training further. Per-type results are in <code>docs/01-specification.md</code> §10.4.
+    </div>
+  </section>
 
-    <h3>5.1 Local FNBr pipeline — recommended for inspection</h3>
+  <section id="access">
+    <h2>6. Ways to access the parser</h2>
+
+    <h3>6.1 Local FNBr pipeline — recommended for inspection</h3>
     <pre><code>conda run -n trankit-fnbr python scripts/analyze.py \
   "ele tomou o café da manhã logo cedo"</code></pre>
     <p>This defaults to lexical mode. Standard output is JSON; model-loading diagnostics go to standard error. For compact JSON or piped input:</p>
     <pre><code>echo "ele tomou o café da manhã logo cedo" | conda run -n trankit-fnbr \
   python scripts/analyze.py --compact</code></pre>
 
-    <h3>5.2 Local contextual-model mode</h3>
+    <h3>6.2 Local contextual-model mode</h3>
     <pre><code>conda run -n trankit-fnbr python scripts/analyze.py \
   --predictor model --top-k 3 \
   "ele tomou o café da manhã logo cedo"</code></pre>
-    <p>This requires the customized checkpoint configured by <code>FNBR_TRANKIT_LANGUAGE</code>, <code>FNBR_TRANKIT_CACHE_DIR</code>, and <code>FNBR_MODEL_VERSION</code>.</p>
+    <p>This requires the customized checkpoint configured by <code>FNBR_TRANKIT_LANGUAGE</code>, <code>FNBR_TRANKIT_CACHE_DIR</code>, and <code>FNBR_MODEL_VERSION</code>. To reproduce the deployed configuration, with learned dependencies from the joint checkpoint:</p>
+    <pre><code>conda run -n trankit-fnbr python scripts/analyze.py \
+  --predictor model --scaffold-source model \
+  --fnbr-cache-dir ./cache/fnbr-joint \
+  --model-version h8418_0-joint-epoch3@202610021100 \
+  "ele tomou o café da manhã logo cedo"</code></pre>
 
-    <h3>5.3 HTTP API</h3>
+    <h3>6.3 HTTP API</h3>
     <pre><code>conda run -n trankit-fnbr fastapi run main.py --port 8000
 
 curl -s http://localhost:8000/fnbr/ \
@@ -229,14 +280,14 @@ curl -s http://localhost:8000/fnbr/ \
       The API mode is selected at process startup through <code>FNBR_PREDICTOR_MODE</code>. Use <code>lexical</code> for the database-derived baseline or <code>model</code> for a trained customized checkpoint. It cannot be switched per request.
     </div>
 
-    <h3>5.4 Docker container</h3>
-    <p>Create the deployment configuration first. Set a real read-only database URL and identifiable lexicon revision. For the jointly trained checkpoint, use <code>FNBR_PREDICTOR_MODE=model</code>, <code>FNBR_SCAFFOLD_SOURCE=model</code>, and <code>FNBR_TRANKIT_CACHE_DIR=./cache/fnbr-joint</code>. The mounted cache must contain the Portuguese Trankit model and the customized joint checkpoint with <code>fnbr.training.json</code>.</p>
+    <h3>6.4 Docker container</h3>
+    <p>Create the deployment configuration first. Set a real read-only database URL and identifiable lexicon revision. For the jointly trained checkpoint, use <code>FNBR_PREDICTOR_MODE=model</code>, <code>FNBR_SCAFFOLD_SOURCE=model</code>, and <code>FNBR_TRANKIT_CACHE_DIR=./cache/fnbr-joint</code>. The mounted cache must contain the Portuguese Trankit model and the customized joint checkpoint with <code>fnbr.training.json</code> (layout in <a href="#model">§5</a>). The database URL may use <code>host.docker.internal</code> to reach a database on the Docker host; Compose maps that name to the host gateway, which Docker Engine on Linux does not do by default.</p>
     <pre><code>cp .env.example .env
 # Edit .env before continuing.
 
 docker compose up --build -d
 docker compose logs -f trankit-fnbr</code></pre>
-    <p>The Compose service publishes container port 80 as <code>127.0.0.1:8405</code> (configurable via <code>FNBR_HTTP_BIND</code>/<code>FNBR_HTTP_PORT</code>) and mounts <code>./cache</code> at <code>/code/cache</code>. It uses the project Conda environment and a single CPU worker. In another terminal:</p>
+    <p>The Compose service publishes container port 80 as <code>127.0.0.1:8405</code> (configurable via <code>FNBR_HTTP_BIND</code>/<code>FNBR_HTTP_PORT</code>) and mounts <code>./cache</code> at <code>/code/cache</code>. It uses the project Conda environment and a single CPU worker. Model loading takes about 20 seconds after the first start; on the first start, missing Portuguese Trankit and XLM-R files are downloaded into the mounted cache. In another terminal:</p>
     <pre><code>curl -s http://localhost:8405/health/ready
 conda run -n trankit-fnbr python scripts/smoke_http.py</code></pre>
     <p>Readiness checks the loaded model and database connection; liveness is <code>/health/live</code>. Do not bind to an external address without TLS and authentication at a trusted reverse proxy.</p>
@@ -246,14 +297,14 @@ conda run -n trankit-fnbr python scripts/smoke_http.py</code></pre>
     <p>Stop and remove the service without deleting the model cache:</p>
     <pre><code>docker compose down</code></pre>
 
-    <h3>5.5 Python API — complete pipeline</h3>
+    <h3>6.5 Python API — complete pipeline</h3>
     <pre><code>from trankit_fnbr.runtime import build_pipeline
 
 pipeline = build_pipeline(predictor_mode="lexical")
 result = pipeline.analyze("ele tomou o café da manhã logo cedo", top_k=3)</code></pre>
     <p>Use <code>predictor_mode="model"</code> only when the customized FNBr checkpoint is configured.</p>
 
-    <h3>5.6 Standard Trankit only — raw text</h3>
+    <h3>6.6 Standard Trankit only — raw text</h3>
     <pre><code>from trankit import Pipeline
 
 parser = Pipeline(
@@ -265,12 +316,12 @@ parser = Pipeline(
 standard_ud = parser("ele tomou o café da manhã logo cedo")</code></pre>
     <p>This bypasses FNBr lookup, MWE lattice construction, lexical types, provenance, and dependency projection.</p>
 
-    <h3>5.7 Customized Trankit only — pre-tokenized input</h3>
+    <h3>6.7 Customized Trankit only — pre-tokenized input</h3>
     <pre><code>from trankit import Pipeline
 
 fnbr_parser = Pipeline(
     lang="customized",
-    cache_dir="./cache/fnbr",
+    cache_dir="./cache/fnbr-joint",
     gpu=False,
     embedding="xlm-roberta-large",
 )
@@ -284,7 +335,7 @@ result = fnbr_parser.posdep(
   </section>
 
   <section id="response">
-    <h2>6. Response interpretation</h2>
+    <h2>7. Response interpretation</h2>
     <table>
       <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
       <tbody>
@@ -292,7 +343,9 @@ result = fnbr_parser.posdep(
         <tr><td><code>lexical_type</code></td><td>The authoritative type stored on the selected FNBr lemma. It is not a contextual model prediction.</td></tr>
         <tr><td><code>lemma_candidates</code></td><td>All retained FNBr lemma identifiers for the selected span.</td></tr>
         <tr><td><code>lemma_type_candidates</code></td><td>Ranked type evidence. In lexical mode this is a dictionary-derived prior; in model mode it comes from the customized head.</td></tr>
-        <tr><td><code>head</code>, <code>deprel</code></td><td>The dependency scaffold projected from the first UD parse.</td></tr>
+        <tr><td><code>head</code>, <code>deprel</code></td><td>The dependency scaffold: projected from the first UD parse, or learned by the joint checkpoint when <code>scaffold_source</code> is <code>model</code>.</td></tr>
+        <tr><td><code>projected_head</code>, <code>projected_deprel</code></td><td>Present only with the <code>model</code> scaffold source: the projected first-pass attachment, kept for comparison.</td></tr>
+        <tr><td><code>scaffold_source</code></td><td>Top-level: <code>projected</code> or <code>model</code>.</td></tr>
         <tr><td><code>source_token_ids</code></td><td>The first-pass word tokens represented by this lexical unit.</td></tr>
         <tr><td><code>start_char</code>, <code>end_char</code></td><td>Offsets into the original text.</td></tr>
         <tr><td><code>lattice</code></td><td>Selected and rejected lexical/pattern/construction evidence retained for diagnostics.</td></tr>
@@ -316,13 +369,14 @@ result = fnbr_parser.posdep(
   </section>
 
   <section id="limitations">
-    <h2>7. Current boundaries and pending choices</h2>
+    <h2>8. Current boundaries and pending choices</h2>
     <ul>
       <li>The contextual predictor runs after lexical sequence selection and does not currently feed its probabilities back into lemma or MWE selection.</li>
       <li>When <code>FNBR_SCAFFOLD_SOURCE=model</code>, the second Trankit pass supplies lexical-unit dependencies and the projected first-pass dependencies remain available as provenance. Only use this option with the jointly trained checkpoint; type-only checkpoints have untrained dependency weights.</li>
-      <li>The HTTP endpoint currently selects model mode at startup; lexical/model mode is selectable only through the local or Python interfaces.</li>
+      <li>The HTTP endpoint fixes predictor mode and scaffold source at startup through <code>FNBR_PREDICTOR_MODE</code> and <code>FNBR_SCAFFOLD_SOURCE</code>; they cannot be switched per request.</li>
       <li>The Python pattern matcher covers the implemented pattern subset. Construction matches are diagnostic lattice evidence rather than selected lexical units.</li>
-      <li>A genuine lexicon revision must replace the example <code>webtool45-YYYYMMDD</code> value before output is considered reproducible.</li>
+      <li>A genuine lexicon revision must replace the example <code>webtool46-YYYYMMDD</code> value in <code>.env.example</code> before output is considered reproducible.</li>
+      <li>The deployed joint checkpoint was selected by Trankit's average development CoNLL-U score, not by FNBr macro-F1, and scores slightly lower on type metrics than the type-only checkpoint (§5).</li>
     </ul>
     <div class="note">
       <strong>Decision point:</strong> the deterministic projection remains the baseline. The joint model was trained on automatically projected dependencies and provisional lemma-type labels; its attachments are a learned syntactic scaffold, not a semantic dependency grammar. Contextual disambiguation still needs independently reviewed ambiguous occurrences for evaluation.

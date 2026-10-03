@@ -35,7 +35,7 @@ The response includes selected lexical units, alternative lattice analyses, sour
 
 ## Docker HTTP service
 
-The image uses the `trankit-fnbr` Conda environment. It does **not** contain credentials or model weights: Compose reads `.env` and mounts `./cache` at `/code/cache`. Ensure `cache/trankit/xlm-roberta-large/portuguese/` and `cache/fnbr-joint/xlm-roberta-large/customized/` contain the standard Portuguese model and trained joint checkpoint (including `fnbr.training.json`). Set `.env` to `FNBR_PREDICTOR_MODE=model`, `FNBR_SCAFFOLD_SOURCE=model`, `FNBR_TRANKIT_CACHE_DIR=./cache/fnbr-joint`, and the corresponding `FNBR_MODEL_VERSION` and `FNBR_LEXICON_REVISION`. The configured database must be reachable **from inside the container** with read-only credentials.
+The image uses the `trankit-fnbr` Conda environment. It does **not** contain credentials or model weights: Compose reads `.env` and mounts `./cache` at `/code/cache`. Ensure `cache/trankit/xlm-roberta-large/portuguese/` and `cache/fnbr-joint/xlm-roberta-large/customized/` contain the standard Portuguese model and trained joint checkpoint (including `fnbr.training.json`). Set `.env` to `FNBR_PREDICTOR_MODE=model`, `FNBR_SCAFFOLD_SOURCE=model`, `FNBR_TRANKIT_CACHE_DIR=./cache/fnbr-joint`, and the corresponding `FNBR_MODEL_VERSION` and `FNBR_LEXICON_REVISION`. The configured database must be reachable **from inside the container** with read-only credentials. For a database on the Docker host, use `host.docker.internal` in `FNBR_DATABASE_URL`; Compose maps it to the host gateway, and the database must listen on an address the Docker bridge can reach.
 
 ```bash
 docker compose up --build -d
