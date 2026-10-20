@@ -123,3 +123,5 @@ To serve it, set `FNBR_TRANKIT_CACHE_DIR=./cache/fnbr-joint`, `FNBR_PREDICTOR_MO
 conda run -n trankit-fnbr python -m pytest
 conda run -n trankit-fnbr mypy trankit_fnbr
 ```
+
+<!-- cache check 2026-10-20 -->
